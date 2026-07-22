@@ -1,7 +1,7 @@
 # ⬢ Andro-CD — Pull-based GitOps for AWS ECS
 
 [![CI](https://github.com/cyberlabrs/andro-cd/actions/workflows/ci.yml/badge.svg)](https://github.com/cyberlabrs/andro-cd/actions/workflows/ci.yml)
-[![Docs](https://github.com/cyberlabrs/andro-cd/actions/workflows/docs.yml/badge.svg)](https://cyberlabrs.github.io/andro-cd/)
+[![Docs](https://github.com/cyberlabrs/andro-cd/actions/workflows/docs.yml/badge.svg)](https://andro-cd.com/)
 [![Release](https://img.shields.io/github/v/release/cyberlabrs/andro-cd?include_prereleases)](https://github.com/cyberlabrs/andro-cd/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -9,7 +9,7 @@
 manifests, diffs them against live AWS state, and reconciles the difference — services,
 task definitions, scheduled tasks and the clusters themselves, all declared in Git.
 
-**📖 Documentation: [cyberlabrs.github.io/andro-cd](https://cyberlabrs.github.io/andro-cd/)**
+**📖 Documentation: [andro-cd.com](https://andro-cd.com/)**
 
 ## Highlights
 
@@ -58,7 +58,7 @@ spec:
         logGroup: /ecs/web-app
 ```
 
-See the [documentation](https://cyberlabrs.github.io/andro-cd/) for the full
+See the [documentation](https://andro-cd.com/) for the full
 manifest reference, security setup, HA, and the HTTP API.
 
 ## Architecture

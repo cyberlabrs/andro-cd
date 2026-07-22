@@ -1,6 +1,6 @@
 site_name: Andro-CD
 site_description: Pull-based GitOps for AWS ECS — like ArgoCD, but for ECS services, task definitions, scheduled tasks and clusters.
-site_url: https://cyberlabrs.github.io/andro-cd/
+site_url: https://andro-cd.com/
 repo_url: https://github.com/cyberlabrs/andro-cd
 repo_name: cyberlabrs/andro-cd
 edit_uri: edit/main/docs/
