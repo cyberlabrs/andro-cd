@@ -1,0 +1,22 @@
+# Managed ECS cluster with all settings (kind: ECSCluster).
+# Pattern: cluster in wave 0, services targeting it in wave 1+.
+apiVersion: andro-cd/v1
+kind: ECSCluster
+metadata:
+  name: production                     # cluster name (override with spec.cluster)
+  labels: {team: platform, env: production}   # propagated as AWS tags
+spec:
+  region: eu-central-1
+  wave: 0                              # created before wave-1 services
+  containerInsights: enhanced          # disabled | enabled | enhanced
+  capacityProviders: [FARGATE, FARGATE_SPOT]
+  defaultCapacityProviderStrategy:     # default for services without their own strategy
+    - provider: FARGATE_SPOT
+      weight: 3
+    - provider: FARGATE
+      weight: 1
+      base: 1
+  serviceConnectNamespace: internal    # Cloud Map namespace (name or ARN)
+  syncPolicy:
+    prune: false                       # true = delete the cluster when removed from git
+                                       # (refused while it still has services/tasks)

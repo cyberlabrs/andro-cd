@@ -1,0 +1,69 @@
+site_name: Andro-CD
+site_description: Pull-based GitOps for AWS ECS — like ArgoCD, but for ECS services, task definitions, scheduled tasks and clusters.
+site_url: https://cyberlabrs.github.io/andro-cd/
+repo_url: https://github.com/cyberlabrs/andro-cd
+repo_name: cyberlabrs/andro-cd
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  icon:
+    logo: material/hexagon-multiple
+    repo: fontawesome/brands/github
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: black
+      accent: deep orange
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: deep orange
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.action.edit
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.details
+  - pymdownx.tabbed:
+      alternate_style: true
+
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - Manifest reference: manifest.md
+  - Operations: operations.md
+  - Security: security.md
+  - Observability: observability.md
+  - API & CLI: api.md
+  - Configuration: configuration.md
+  - Roadmap: roadmap.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/cyberlabrs/andro-cd

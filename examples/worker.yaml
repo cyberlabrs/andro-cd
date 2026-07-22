@@ -1,0 +1,30 @@
+apiVersion: andro-cd/v1
+kind: ECSService
+metadata:
+  name: background-worker
+spec:
+  region: eu-central-1
+  cluster: production
+  service:
+    desiredCount: 1
+    launchType: FARGATE
+    assignPublicIp: false
+  network:
+    subnets:
+      - subnet-0aaa111
+    securityGroups:
+      - sg-0ccc333
+  taskDefinition:
+    cpu: "512"
+    memory: "1024"
+    executionRoleArn: arn:aws:iam::123456789012:role/ecsTaskExecutionRole
+    taskRoleArn: arn:aws:iam::123456789012:role/workerAppRole
+    containers:
+      - name: worker
+        image: 123456789012.dkr.ecr.eu-central-1.amazonaws.com/worker:v1.4.2
+        command: ["python", "-m", "worker.main"]
+        environment:
+          QUEUE_URL: https://sqs.eu-central-1.amazonaws.com/123456789012/jobs
+        secrets:
+          DB_PASSWORD: arn:aws:ssm:eu-central-1:123456789012:parameter/worker/db-password
+        logGroup: /ecs/background-worker

@@ -1,0 +1,104 @@
+# App-of-apps: one template -> N applications
+apiVersion: andro-cd/v1
+kind: ECSServiceSet
+metadata:
+  name: api-environments
+spec:
+  generators:
+    - values: {env: dev, count: 1, cpu: "256", memory: "512"}
+    - values: {env: prod, count: 3, cpu: "512", memory: "1024"}
+  template:
+    apiVersion: andro-cd/v1
+    kind: ECSService
+    metadata:
+      name: api-${env}
+      labels: {env: "${env}", team: backend}
+    spec:
+      cluster: ${env}
+      wave: 1                          # deploys after wave 0 apps are Synced+Healthy
+      service:
+        desiredCount: ${count}
+        launchType: FARGATE
+        autoscaling:                   # autoscaler owns desiredCount from here on
+          minCount: ${count}
+          maxCount: 10
+          targetCpu: 60
+        loadBalancer:                  # attach to an existing target group
+          targetGroupArn: arn:aws:elasticloadbalancing:eu-central-1:123456789012:targetgroup/api-${env}/abc
+          containerPort: 8080
+      network:
+        subnets: [subnet-aaa, subnet-bbb]
+        securityGroups: [sg-0ccc333]
+      syncPolicy:
+        selfHeal: true
+        prune: true
+        syncWindows:                   # auto-sync only on workdays 07:00–19:00 UTC
+          - days: [Mon, Tue, Wed, Thu, Fri]
+            start: "07:00"
+            end: "19:00"
+      hooks:
+        preSync:                       # run migrations before every rollout
+          command: ["python", "manage.py", "migrate"]
+          timeoutSeconds: 600
+      taskDefinition:
+        resolveImages: true            # pin ECR tags to digests at sync time
+        executionRoleArn: arn:aws:iam::123456789012:role/ecsTaskExecutionRole
+        containers:
+          - name: api
+            image: 123456789012.dkr.ecr.eu-central-1.amazonaws.com/api:latest
+            portMappings: [8080]
+            logGroup: /ecs/api-${env}
+            healthCheck:               # container-level health check (docker semantics)
+              command: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+              interval: 30
+              retries: 3
+---
+# Cost-optimized worker on Fargate Spot (weighted capacity provider strategy)
+apiVersion: andro-cd/v1
+kind: ECSService
+metadata:
+  name: spot-worker
+  labels: {team: backend, tier: batch}   # labels propagate to AWS tags
+spec:
+  cluster: workers
+  service:
+    desiredCount: 4
+    capacityProviders:                   # replaces plain launchType
+      - provider: FARGATE_SPOT
+        weight: 3                        # 3 of 4 tasks on Spot…
+      - provider: FARGATE
+        weight: 1
+        base: 1                          # …but always ≥1 on on-demand
+  network:
+    subnets: [subnet-aaa, subnet-bbb]
+    securityGroups: [sg-0ccc333]
+  taskDefinition:
+    containers:
+      - name: worker
+        image: 123456789012.dkr.ecr.eu-central-1.amazonaws.com/worker:stable
+        logGroup: /ecs/spot-worker
+---
+# Scheduled task (EventBridge Scheduler cron)
+apiVersion: andro-cd/v1
+kind: ECSScheduledTask
+metadata:
+  name: nightly-report
+  labels: {team: data}
+spec:
+  cluster: batch
+  schedule:
+    expression: cron(0 3 * * ? *)      # every day 03:00 UTC
+    roleArn: arn:aws:iam::123456789012:role/androcdSchedulerRole
+    enabled: true
+  network:
+    subnets: [subnet-aaa]
+    securityGroups: [sg-0ccc333]
+  taskDefinition:
+    cpu: "512"
+    memory: "1024"
+    executionRoleArn: arn:aws:iam::123456789012:role/ecsTaskExecutionRole
+    containers:
+      - name: report
+        image: 123456789012.dkr.ecr.eu-central-1.amazonaws.com/reports:v2
+        command: ["python", "-m", "reports.nightly"]
+        logGroup: /ecs/nightly-report

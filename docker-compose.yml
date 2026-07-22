@@ -1,0 +1,87 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: androcd
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-androcd}
+      POSTGRES_DB: androcd
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U androcd -d androcd"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+    restart: unless-stopped
+    # intentionally NOT published on the host — only andro-cd reaches it
+
+  andro-cd:
+    build: .
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # optional bootstrap repo — repos can also be added at runtime via the UI (Repositories)
+      GIT_REPO_URL: ${GIT_REPO_URL:-}
+      GIT_BRANCH: ${GIT_BRANCH:-main}
+      GIT_PATH: ${GIT_PATH:-}
+      GIT_TOKEN: ${GIT_TOKEN:-}
+      SYNC_INTERVAL: ${SYNC_INTERVAL:-60}
+      AUTO_SYNC: ${AUTO_SYNC:-true}
+      DRY_RUN: ${DRY_RUN:-false}
+      RECONCILE_WORKERS: ${RECONCILE_WORKERS:-8}
+      KEEP_TASKDEF_REVISIONS: ${KEEP_TASKDEF_REVISIONS:-0}
+      LOG_FORMAT: ${LOG_FORMAT:-text}
+      AWS_REGION: ${AWS_REGION:-eu-central-1}
+      DATABASE_URL: postgresql+psycopg://androcd:${POSTGRES_PASSWORD:-androcd}@db:5432/androcd
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+      # GitHub OAuth login (AUTH_MODE=github + OAuth app credentials)
+      AUTH_MODE: ${AUTH_MODE:-none}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      GITHUB_ALLOWED_ORG: ${GITHUB_ALLOWED_ORG:-}
+      GITHUB_ALLOWED_USERS: ${GITHUB_ALLOWED_USERS:-}
+      # RBAC + secrets
+      RBAC_ADMINS: ${RBAC_ADMINS:-}
+      RBAC_OPERATORS: ${RBAC_OPERATORS:-}
+      RBAC_DEFAULT_ROLE: ${RBAC_DEFAULT_ROLE:-}
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
+      API_TOKENS: ${API_TOKENS:-}
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8080}
+      # for local development: creds from .env or the mounted ~/.aws
+      # (empty values are stripped at startup so unset vars are harmless)
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+      AWS_PROFILE: ${AWS_PROFILE:-}
+    volumes:
+      # container runs as non-root user "androcd" (uid 10001) with HOME=/home/androcd
+      - ~/.aws:/home/androcd/.aws:ro
+      - appdata:/data
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      # liveness only — /readyz (deps: db, git) is for load balancers / monitoring
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  appdata:

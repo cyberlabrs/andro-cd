@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+node_modules/
+frontend/dist/
+.env
+.DS_Store
+.claude
+
+# mkdocs build output
+site/
