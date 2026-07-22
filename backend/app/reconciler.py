@@ -204,12 +204,17 @@ def _deployment_configuration(m: Manifest) -> dict:
     return dc
 
 
-def _load_balancers(m: Manifest) -> list[dict]:
+def _load_balancers(m: Manifest, tg_arn: Optional[str] = None) -> list[dict]:
+    """Service loadBalancers attachment. In managed mode the target group is created
+    by Andro-CD, so its ARN is resolved at runtime and passed in as `tg_arn`."""
     lb = m.spec.service.loadBalancer
     if not lb:
         return []
+    arn = lb.targetGroupArn or tg_arn
+    if not arn:
+        return []
     return [{
-        "targetGroupArn": lb.targetGroupArn,
+        "targetGroupArn": arn,
         "containerName": lb.containerName or m.spec.taskDefinition.containers[0].name,
         "containerPort": lb.containerPort,
     }]
@@ -220,8 +225,8 @@ def _lb_key(lb: dict) -> tuple:
     return (lb.get("targetGroupArn"), lb.get("containerName"), lb.get("containerPort"))
 
 
-def _lb_changes(m: Manifest, service: dict) -> list[str]:
-    desired = _load_balancers(m)
+def _lb_changes(m: Manifest, service: dict, tg_arn: Optional[str] = None) -> list[str]:
+    desired = _load_balancers(m, tg_arn)
     live = [{"targetGroupArn": l.get("targetGroupArn"),
              "containerName": l.get("containerName"),
              "containerPort": l.get("containerPort")}
@@ -230,6 +235,199 @@ def _lb_changes(m: Manifest, service: dict) -> list[str]:
     if sorted(map(_lb_key, desired)) != sorted(map(_lb_key, live)):
         return [f"loadBalancers: {live or None} -> {desired or None}"]
     return []
+
+
+# ---------- managed load balancer (loadBalancer.create: TG + listener rule) ----------
+
+def _managed_lb(m: Manifest):
+    lb = m.spec.service.loadBalancer
+    return lb.create if lb else None
+
+
+def _tg_name(m: Manifest) -> str:
+    """Target group name (ALB limit: 32 chars, no leading/trailing hyphen)."""
+    return f"androcd-{m.name}"[:32].strip("-")
+
+
+def _tg_port(m: Manifest) -> int:
+    mg = _managed_lb(m)
+    return mg.port or m.spec.service.loadBalancer.containerPort
+
+
+def _find_tg(elb, name: str) -> Optional[dict]:
+    try:
+        return elb.describe_target_groups(Names=[name])["TargetGroups"][0]
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "TargetGroupNotFound":
+            return None
+        raise
+
+
+def _vpc_id(m: Manifest, region: str) -> str:
+    """VPC for the target group: spec.network.vpc, or derived from the first subnet."""
+    if m.spec.network.vpc:
+        return m.spec.network.vpc
+    ec2 = _client("ec2", region, m)
+    subnets = ec2.describe_subnets(SubnetIds=[m.spec.network.subnets[0]])["Subnets"]
+    return subnets[0]["VpcId"]
+
+
+def _tg_hc_changes(live_tg: dict, mg) -> list[str]:
+    """Pure diff of target-group health check settings vs the manifest."""
+    hc = mg.healthCheck
+    live_matcher = (live_tg.get("Matcher") or {}).get("HttpCode")
+    pairs = [
+        ("healthCheck.path", live_tg.get("HealthCheckPath"), hc.path),
+        ("healthCheck.interval", live_tg.get("HealthCheckIntervalSeconds"), hc.interval),
+        ("healthCheck.timeout", live_tg.get("HealthCheckTimeoutSeconds"), hc.timeout),
+        ("healthCheck.healthyThreshold", live_tg.get("HealthyThresholdCount"), hc.healthyThreshold),
+        ("healthCheck.unhealthyThreshold", live_tg.get("UnhealthyThresholdCount"), hc.unhealthyThreshold),
+        ("healthCheck.matcher", live_matcher, hc.matcher),
+    ]
+    return [f"targetGroup.{name}: {live} -> {want}" for name, live, want in pairs if live != want]
+
+
+def _rule_conditions(mg) -> list[dict]:
+    conditions: list[dict] = []
+    if mg.rule.hostHeader:
+        conditions.append({"Field": "host-header",
+                           "HostHeaderConfig": {"Values": [mg.rule.hostHeader]}})
+    if mg.rule.pathPattern:
+        conditions.append({"Field": "path-pattern",
+                           "PathPatternConfig": {"Values": [mg.rule.pathPattern]}})
+    return conditions
+
+
+def _norm_conditions(conditions: list[dict]) -> dict:
+    """{field: sorted values} — ignores ordering and legacy Values duplication."""
+    out: dict[str, list[str]] = {}
+    for c in conditions:
+        key = "HostHeaderConfig" if c.get("Field") == "host-header" else "PathPatternConfig"
+        values = (c.get(key) or {}).get("Values") or c.get("Values") or []
+        out[c["Field"]] = sorted(values)
+    return out
+
+
+def _find_rule(elb, listener_arn: str, tg_arn: str) -> Optional[dict]:
+    """The (non-default) listener rule forwarding to our target group."""
+    for rule in elb.describe_rules(ListenerArn=listener_arn).get("Rules", []):
+        if rule.get("IsDefault"):
+            continue
+        if any(a.get("TargetGroupArn") == tg_arn for a in rule.get("Actions", [])):
+            return rule
+    return None
+
+
+def _managed_lb_changes(m: Manifest, region: str) -> tuple[list[str], Optional[str]]:
+    """Diff for managed mode. Returns (changes, tg_arn if the TG already exists)."""
+    mg = _managed_lb(m)
+    if not mg:
+        return [], None
+    elb = _client("elbv2", region, m)
+    changes: list[str] = []
+    rule_desc = mg.rule.hostHeader or mg.rule.pathPattern
+
+    tg = _find_tg(elb, _tg_name(m))
+    if tg is None:
+        changes.append(f"target group '{_tg_name(m)}' will be created "
+                       f"({mg.protocol}:{_tg_port(m)})")
+        changes.append(f"listener rule will be created ({rule_desc} -> {_tg_name(m)})")
+        return changes, None
+
+    tg_arn = tg["TargetGroupArn"]
+    changes.extend(_tg_hc_changes(tg, mg))
+
+    rule = _find_rule(elb, mg.listenerArn, tg_arn)
+    if rule is None:
+        changes.append(f"listener rule will be created ({rule_desc} -> {_tg_name(m)})")
+    elif _norm_conditions(rule.get("Conditions", [])) != _norm_conditions(_rule_conditions(mg)):
+        changes.append(
+            f"listener rule conditions: {_norm_conditions(rule.get('Conditions', []))}"
+            f" -> {_norm_conditions(_rule_conditions(mg))}")
+    return changes, tg_arn
+
+
+def _apply_managed_lb(m: Manifest, region: str) -> tuple[list[str], Optional[str]]:
+    """Create/update the managed target group + listener rule. Returns (actions, tg_arn)."""
+    mg = _managed_lb(m)
+    if not mg:
+        return [], None
+    elb = _client("elbv2", region, m)
+    actions: list[str] = []
+    hc = mg.healthCheck
+
+    tg = _find_tg(elb, _tg_name(m))
+    if tg is None:
+        kwargs: dict[str, Any] = dict(
+            Name=_tg_name(m),
+            Protocol=mg.protocol,
+            Port=_tg_port(m),
+            VpcId=_vpc_id(m, region),
+            TargetType="ip",              # awsvpc/Fargate tasks register by IP
+            HealthCheckPath=hc.path,
+            HealthCheckIntervalSeconds=hc.interval,
+            HealthCheckTimeoutSeconds=hc.timeout,
+            HealthyThresholdCount=hc.healthyThreshold,
+            UnhealthyThresholdCount=hc.unhealthyThreshold,
+            Matcher={"HttpCode": hc.matcher},
+        )
+        if m.metadata.labels:
+            kwargs["Tags"] = [{"Key": k, "Value": v} for k, v in sorted(m.metadata.labels.items())]
+        tg = elb.create_target_group(**kwargs)["TargetGroups"][0]
+        actions.append(f"created target group '{_tg_name(m)}'")
+    elif _tg_hc_changes(tg, mg):
+        elb.modify_target_group(
+            TargetGroupArn=tg["TargetGroupArn"],
+            HealthCheckPath=hc.path,
+            HealthCheckIntervalSeconds=hc.interval,
+            HealthCheckTimeoutSeconds=hc.timeout,
+            HealthyThresholdCount=hc.healthyThreshold,
+            UnhealthyThresholdCount=hc.unhealthyThreshold,
+            Matcher={"HttpCode": hc.matcher},
+        )
+        actions.append(f"updated target group health check ('{_tg_name(m)}')")
+    tg_arn = tg["TargetGroupArn"]
+
+    rule = _find_rule(elb, mg.listenerArn, tg_arn)
+    if rule is None:
+        elb.create_rule(
+            ListenerArn=mg.listenerArn,
+            Priority=mg.rule.priority,
+            Conditions=_rule_conditions(mg),
+            Actions=[{"Type": "forward", "TargetGroupArn": tg_arn}],
+        )
+        actions.append(f"created listener rule (priority {mg.rule.priority})")
+    elif _norm_conditions(rule.get("Conditions", [])) != _norm_conditions(_rule_conditions(mg)):
+        elb.modify_rule(RuleArn=rule["RuleArn"], Conditions=_rule_conditions(mg))
+        actions.append("updated listener rule conditions")
+    return actions, tg_arn
+
+
+def _prune_managed_lb(m: Manifest, region: str) -> list[str]:
+    """Delete the managed rule + target group (only resources Andro-CD created)."""
+    mg = _managed_lb(m)
+    if not mg:
+        return []
+    elb = _client("elbv2", region, m)
+    actions: list[str] = []
+    tg = _find_tg(elb, _tg_name(m))
+    if tg is None:
+        return []
+    tg_arn = tg["TargetGroupArn"]
+    try:
+        rule = _find_rule(elb, mg.listenerArn, tg_arn)
+        if rule:
+            elb.delete_rule(RuleArn=rule["RuleArn"])
+            actions.append("deleted listener rule")
+    except ClientError as e:
+        log.warning("failed to delete listener rule for %s: %s", m.name, e)
+    try:
+        elb.delete_target_group(TargetGroupArn=tg_arn)
+        actions.append(f"deleted target group '{_tg_name(m)}'")
+    except ClientError as e:
+        log.warning("failed to delete target group for %s: %s", m.name, e)
+        actions.append(f"target group '{_tg_name(m)}' could not be deleted: {e.response['Error']['Message'][:200]}")
+    return actions
 
 
 def _autoscaling_changes(m: Manifest, region: str) -> list[str]:
@@ -573,6 +771,13 @@ def compute_diff(m: Manifest) -> dict:
             changes.extend(td_changes)
             td_changed = True
 
+    # Managed load balancer (loadBalancer.create): diff TG + rule, resolve the TG arn
+    # so the service-attachment comparison below uses the real ARN.
+    managed_tg_arn: Optional[str] = None
+    if _managed_lb(m):
+        lb_changes, managed_tg_arn = _managed_lb_changes(m, region)
+        changes.extend(lb_changes)
+
     service = _cached_service(m, region) if cluster else None
     if service is None:
         changes.append(f"service '{m.name}' will be created")
@@ -599,7 +804,10 @@ def compute_diff(m: Manifest) -> dict:
         if net.get("assignPublicIp", "DISABLED") != desired_ip:
             changes.append(f"assignPublicIp: {net.get('assignPublicIp')} -> {desired_ip}")
         changes.extend(_deploy_config_changes(m, service))
-        changes.extend(_lb_changes(m, service))
+        if _managed_lb(m) and managed_tg_arn is None:
+            changes.append("service will be attached to the new target group")
+        else:
+            changes.extend(_lb_changes(m, service, managed_tg_arn))
         changes.extend(_capacity_changes(m, service))
         if m.spec.service.autoscaling or service:
             changes.extend(_autoscaling_changes(m, region))
@@ -755,6 +963,11 @@ def apply(m: Manifest) -> list[str]:
 
     deploy_config = _deployment_configuration(m)
 
+    # Managed load balancer: the target group + rule must exist before the service
+    # can attach to them.
+    lb_actions, managed_tg_arn = _apply_managed_lb(m, region)
+    actions.extend(lb_actions)
+
     service = get_live_service(m, region)
     if service is None:
         create_kwargs: dict[str, Any] = dict(
@@ -773,7 +986,7 @@ def apply(m: Manifest) -> list[str]:
         if m.metadata.labels:
             create_kwargs["tags"] = _aws_tags(m)
             create_kwargs["propagateTags"] = "SERVICE"
-        lbs = _load_balancers(m)
+        lbs = _load_balancers(m, managed_tg_arn)
         if lbs:
             create_kwargs["loadBalancers"] = lbs
         ecs.create_service(**create_kwargs)
@@ -790,7 +1003,7 @@ def apply(m: Manifest) -> list[str]:
             or set(live_net.get("securityGroups", [])) != set(desired_net["securityGroups"])
             or live_net.get("assignPublicIp", "DISABLED") != desired_net["assignPublicIp"]
             or bool(_deploy_config_changes(m, service))
-            or bool(_lb_changes(m, service))
+            or bool(_lb_changes(m, service, managed_tg_arn))
             or bool(_capacity_changes(m, service))
         )
         if needs_update:
@@ -803,8 +1016,8 @@ def apply(m: Manifest) -> list[str]:
             )
             if not m.spec.service.autoscaling:
                 update_kwargs["desiredCount"] = m.spec.service.desiredCount
-            if _lb_changes(m, service):
-                update_kwargs["loadBalancers"] = _load_balancers(m)
+            if _lb_changes(m, service, managed_tg_arn):
+                update_kwargs["loadBalancers"] = _load_balancers(m, managed_tg_arn)
             if _capacity_changes(m, service):
                 # changing the strategy requires a fresh deployment
                 update_kwargs["capacityProviderStrategy"] = _capacity_strategy(m)
@@ -996,10 +1209,15 @@ def prune(m: Manifest) -> list[str]:
         return _cluster_prune(_client("ecs", region, m), m.spec.cluster)
     ecs = _client("ecs", region, m)
     service = get_live_service(m, region)
-    if not service:
-        return ["service already gone"]
-    ecs.delete_service(cluster=m.spec.cluster, service=m.name, force=True)
-    return [f"deleted service '{m.name}' from cluster '{m.spec.cluster}'"]
+    actions: list[str] = []
+    if service:
+        ecs.delete_service(cluster=m.spec.cluster, service=m.name, force=True)
+        actions.append(f"deleted service '{m.name}' from cluster '{m.spec.cluster}'")
+    else:
+        actions.append("service already gone")
+    # Managed load balancer resources (rule + TG) are ours — clean them up too.
+    actions.extend(_prune_managed_lb(m, region))
+    return actions
 
 
 def prune_raw(name: str, kind: str, cluster: str, region: str,
@@ -1482,6 +1700,15 @@ def get_diff_document(m: Manifest) -> dict:
     live_td = _norm_taskdef(live_td_raw) if live_td_raw else None
 
     service = get_live_service(m, region) if m.kind == "ECSService" else None
+    # In managed LB mode resolve the created target group's ARN so the desired vs
+    # live loadBalancers comparison lines up once the TG exists (best-effort).
+    managed_tg_arn = None
+    if _managed_lb(m):
+        try:
+            tg = _find_tg(_client("elbv2", region, m), _tg_name(m))
+            managed_tg_arn = tg["TargetGroupArn"] if tg else None
+        except Exception:
+            managed_tg_arn = None
     desired_svc = {
         "desiredCount": m.spec.service.desiredCount,
         "launchType": m.spec.service.launchType,
@@ -1489,7 +1716,7 @@ def get_diff_document(m: Manifest) -> dict:
         "securityGroups": sorted(m.spec.network.securityGroups),
         "assignPublicIp": "ENABLED" if m.spec.service.assignPublicIp else "DISABLED",
         "deploymentConfiguration": _deployment_configuration(m),
-        "loadBalancers": _load_balancers(m),
+        "loadBalancers": _load_balancers(m, managed_tg_arn),
     }
     live_svc = None
     if service:

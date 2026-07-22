@@ -412,7 +412,9 @@ inspect them in the Application Auto Scaling console).
 
 ## Load balancer
 
-Attach a service to an existing ALB/NLB target group:
+Two modes on `service.loadBalancer`:
+
+**Reference mode** — attach the service to an existing target group:
 
 ```yaml
 spec:
@@ -423,9 +425,38 @@ spec:
       containerPort: 8080
 ```
 
-Requires that the target group's health check port matches your container. Creating the
-ALB/listener/rule from the manifest is on the roadmap — for now bring your own via
-Terraform/CDK/console.
+**Managed mode** — Andro-CD creates and reconciles the target group and a listener rule
+on an existing ALB listener:
+
+```yaml
+spec:
+  service:
+    loadBalancer:
+      containerPort: 8080
+      create:
+        listenerArn: arn:aws:elasticloadbalancing:...:listener/app/main/abc/def
+        port: 8080                      # TG port; defaults to containerPort
+        protocol: HTTP                  # towards the targets: HTTP | HTTPS
+        rule:
+          priority: 10                  # unique per listener; applied at creation
+          hostHeader: api.example.com   # and/or pathPattern
+          pathPattern: /api/*
+        healthCheck:
+          path: /health
+          interval: 30
+          timeout: 5
+          healthyThreshold: 3
+          unhealthyThreshold: 3
+          matcher: "200-399"
+```
+
+- The target group is named `androcd-<app>` (ip target type, required for awsvpc); the
+  VPC comes from `spec.network.vpc` or is derived from the first subnet.
+- Health-check settings and rule conditions are diffed and reconciled; **Prune** deletes
+  the rule and TG together with the service.
+- The ALB and listener themselves stay your infrastructure — one ALB serves many apps,
+  each with its own rule. Requires the `elasticloadbalancing:*` permissions from the
+  IAM section below.
 
 ---
 
@@ -803,6 +834,16 @@ Minimum policy for the IAM role running Andro-CD:
         "logs:GetLogEvents",
         "logs:FilterLogEvents",
         "ecr:DescribeImages",
+        "ec2:DescribeSubnets",
+        "elasticloadbalancing:DescribeTargetGroups",
+        "elasticloadbalancing:CreateTargetGroup",
+        "elasticloadbalancing:ModifyTargetGroup",
+        "elasticloadbalancing:DeleteTargetGroup",
+        "elasticloadbalancing:DescribeRules",
+        "elasticloadbalancing:CreateRule",
+        "elasticloadbalancing:ModifyRule",
+        "elasticloadbalancing:DeleteRule",
+        "elasticloadbalancing:AddTags",
         "application-autoscaling:*",
         "scheduler:CreateSchedule",
         "scheduler:UpdateSchedule",

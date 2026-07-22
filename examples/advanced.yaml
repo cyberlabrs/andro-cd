@@ -5,8 +5,8 @@ metadata:
   name: api-environments
 spec:
   generators:
-    - values: {env: dev, count: 1, cpu: "256", memory: "512"}
-    - values: {env: prod, count: 3, cpu: "512", memory: "1024"}
+    - values: {env: dev, count: 1, cpu: "256", memory: "512", rulePriority: 20}
+    - values: {env: prod, count: 3, cpu: "512", memory: "1024", rulePriority: 10}
   template:
     apiVersion: andro-cd/v1
     kind: ECSService
@@ -23,9 +23,16 @@ spec:
           minCount: ${count}
           maxCount: 10
           targetCpu: 60
-        loadBalancer:                  # attach to an existing target group
-          targetGroupArn: arn:aws:elasticloadbalancing:eu-central-1:123456789012:targetgroup/api-${env}/abc
+        loadBalancer:
           containerPort: 8080
+          create:                      # managed mode: Andro-CD creates TG + listener rule
+            listenerArn: arn:aws:elasticloadbalancing:eu-central-1:123456789012:listener/app/main/abc/def
+            rule:
+              priority: ${rulePriority}
+              hostHeader: api-${env}.example.com
+            healthCheck:
+              path: /health
+              matcher: "200"
       network:
         subnets: [subnet-aaa, subnet-bbb]
         securityGroups: [sg-0ccc333]

@@ -68,6 +68,34 @@ Target-tracking Application Auto Scaling; once configured, the autoscaler owns
 `desiredCount` and the reconciler stops fighting it. Removing the block deregisters the
 scalable target. Policies are named `androcd-<app>-cpu` / `-memory`.
 
+## Load balancing
+
+Two modes on `service.loadBalancer`:
+
+- **Reference** (`targetGroupArn`) — attach the service to a target group you manage
+  elsewhere (Terraform/CDK/console).
+- **Managed** (`create`) — Andro-CD creates and reconciles an **ip-target-type target
+  group** and a **listener rule** (host/path based) on an existing ALB listener:
+
+```yaml
+service:
+  loadBalancer:
+    containerPort: 8080
+    create:
+      listenerArn: arn:aws:elasticloadbalancing:...:listener/app/main/abc/def
+      rule: {priority: 10, hostHeader: api.example.com}
+      healthCheck: {path: /health, matcher: "200"}
+```
+
+- The TG is named `androcd-<app>`; the VPC comes from `spec.network.vpc` or is derived
+  from the first subnet.
+- Health-check settings and rule conditions are diffed and reconciled like any other
+  field; rule `priority` is applied at creation.
+- **Prune** deletes the rule and the TG together with the service (only resources
+  Andro-CD created — the ALB and listener are never touched).
+- The ALB and its listener remain your infrastructure — one ALB serves many
+  Andro-CD apps, each with its own rule.
+
 ## Capacity providers (Fargate Spot)
 
 ```yaml

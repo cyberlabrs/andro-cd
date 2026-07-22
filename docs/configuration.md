@@ -62,6 +62,12 @@ Minimum policy for the role running Andro-CD:
       "logs:CreateLogGroup", "logs:DescribeLogStreams",
       "logs:GetLogEvents", "logs:FilterLogEvents",
       "ecr:DescribeImages",
+      "ec2:DescribeSubnets",
+      "elasticloadbalancing:DescribeTargetGroups", "elasticloadbalancing:CreateTargetGroup",
+      "elasticloadbalancing:ModifyTargetGroup", "elasticloadbalancing:DeleteTargetGroup",
+      "elasticloadbalancing:DescribeRules", "elasticloadbalancing:CreateRule",
+      "elasticloadbalancing:ModifyRule", "elasticloadbalancing:DeleteRule",
+      "elasticloadbalancing:AddTags",
       "application-autoscaling:*",
       "scheduler:CreateSchedule", "scheduler:UpdateSchedule",
       "scheduler:DeleteSchedule", "scheduler:GetSchedule",
@@ -73,7 +79,9 @@ Minimum policy for the role running Andro-CD:
 ```
 
 Trim per use case: drop `scheduler:*` without `ECSScheduledTask`,
-`application-autoscaling:*` without autoscaling, `ecs:DeleteService` if you never prune,
+`application-autoscaling:*` without autoscaling,
+`elasticloadbalancing:*`/`ec2:DescribeSubnets` without managed load balancers
+(`loadBalancer.create`), `ecs:DeleteService` if you never prune,
 `ecs:DeregisterTaskDefinition` without `KEEP_TASKDEF_REVISIONS`, `ecs:TagResource`
 without labels, the cluster mutations without `ECSCluster`.
 

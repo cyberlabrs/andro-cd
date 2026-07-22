@@ -85,10 +85,63 @@ class AutoscalingSpec(BaseModel):
     targetMemory: Optional[int] = None   # target memory utilization %
 
 
+class LBHealthCheckSpec(BaseModel):
+    """Target-group health check (managed load-balancer mode)."""
+    path: str = "/"
+    interval: int = 30
+    timeout: int = 5
+    healthyThreshold: int = 3
+    unhealthyThreshold: int = 3
+    matcher: str = "200-399"             # HTTP codes counted as healthy
+
+    @model_validator(mode="after")
+    def _interval_gt_timeout(self) -> "LBHealthCheckSpec":
+        if self.timeout >= self.interval:
+            raise ValueError("healthCheck.timeout must be smaller than healthCheck.interval")
+        return self
+
+
+class LBRuleSpec(BaseModel):
+    """Listener rule routing traffic to the managed target group."""
+    priority: int                        # unique per listener; applied at creation
+    hostHeader: Optional[str] = None     # e.g. api.example.com
+    pathPattern: Optional[str] = None    # e.g. /api/*
+
+    @model_validator(mode="after")
+    def _condition_required(self) -> "LBRuleSpec":
+        if not self.hostHeader and not self.pathPattern:
+            raise ValueError("rule requires hostHeader and/or pathPattern")
+        return self
+
+
+class ManagedLBSpec(BaseModel):
+    """Create the target group + listener rule from the manifest (the ALB itself
+    and its listener are infrastructure — bring your own)."""
+    listenerArn: str                     # existing ALB listener the rule attaches to
+    port: Optional[int] = None           # target group port; defaults to containerPort
+    protocol: str = "HTTP"               # protocol towards the targets: HTTP | HTTPS
+    healthCheck: LBHealthCheckSpec = Field(default_factory=LBHealthCheckSpec)
+    rule: LBRuleSpec
+
+    @field_validator("protocol")
+    @classmethod
+    def _protocol(cls, v: str) -> str:
+        if v not in ("HTTP", "HTTPS"):
+            raise ValueError("protocol must be HTTP or HTTPS")
+        return v
+
+
 class LoadBalancerSpec(BaseModel):
-    targetGroupArn: str
-    containerName: Optional[str] = None  # defaults to the first container
+    targetGroupArn: Optional[str] = None  # reference mode: attach to an existing TG
+    containerName: Optional[str] = None   # defaults to the first container
     containerPort: int
+    create: Optional[ManagedLBSpec] = None  # managed mode: TG + rule created from Git
+
+    @model_validator(mode="after")
+    def _exactly_one_mode(self) -> "LoadBalancerSpec":
+        if bool(self.targetGroupArn) == bool(self.create):
+            raise ValueError("loadBalancer requires exactly one of targetGroupArn (reference) or create (managed)")
+        return self
 
 
 class CapacityProviderSpec(BaseModel):

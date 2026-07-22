@@ -96,8 +96,11 @@ spec:
   at sync time (reliable drift detection + immutable deploys).
 - **`service.autoscaling`**: `{minCount, maxCount, targetCpu?, targetMemory?}` — target-tracking
   Application Auto Scaling; the autoscaler then owns `desiredCount`.
-- **`service.loadBalancer`**: `{targetGroupArn, containerName?, containerPort}` — attach the
-  service to an existing target group.
+- **`service.loadBalancer`**: two modes. Reference —
+  `{targetGroupArn, containerName?, containerPort}` attaches to an existing target group.
+  Managed — `{containerPort, create: {listenerArn, port?, protocol?, rule, healthCheck?}}`
+  creates and reconciles an ip-type target group + host/path listener rule on an existing
+  ALB listener (the ALB itself stays your infra; prune removes the rule + TG).
 - **`service.capacityProviders`**: `[{provider, weight?, base?}]` — weighted capacity
   provider strategy (e.g. `FARGATE_SPOT` 3 : `FARGATE` 1 with base 1) instead of plain
   `launchType`; Fargate providers are associated automatically on cluster creation.
@@ -223,6 +226,8 @@ SQLite / no-DB deployments are single-instance and always leader.
 `ecs:DescribeServices`, `iam:PassRole` (for task/execution roles),
 `ecs:UpdateCluster` + `ecs:PutClusterCapacityProviders` + `ecs:DeleteCluster`
 (kind `ECSCluster`),
+`elasticloadbalancing:*TargetGroup*` + `*Rule*` + `AddTags` + `ec2:DescribeSubnets`
+(managed load balancers, `loadBalancer.create`),
 `logs:CreateLogGroup` (when `logGroup` is used),
 `logs:DescribeLogStreams` + `logs:GetLogEvents` (logs tail in the UI).
 

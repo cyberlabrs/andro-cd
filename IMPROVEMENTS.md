@@ -36,7 +36,11 @@ and roughly ordered by value/effort inside each group.
   (incl. enhanced), attached capacity providers, default capacity provider strategy,
   Service Connect namespace, labels→tags; safe prune that refuses while the cluster has
   workloads; pairs with waves — cluster wave 0, services wave 1)*.
-- **Load balancers** *(target group reference done — `service.loadBalancer: {targetGroupArn, containerName?, containerPort}` attaches the service to an existing TG)*. Still to do: creating ALB/listener/TG from the manifest.
+- **Load balancers** *(done — two modes on `service.loadBalancer`: reference an existing TG
+  via `targetGroupArn`, or `create: {listenerArn, port?, protocol?, rule, healthCheck?}` which
+  creates and reconciles an ip-type target group + host/path listener rule on an existing ALB
+  listener; prune removes the rule + TG)*. The ALB + listener themselves stay user infra
+  (one ALB serves many apps).
 - **Service auto scaling** *(done — `service.autoscaling` min/max + CPU/memory target tracking; autoscaler owns desiredCount)*. Still to do: ALB request-count metric.
 - **Capacity providers** *(done — `service.capacityProviders: [{provider, weight, base}]`
   weighted strategy, e.g. FARGATE_SPOT 3:1 with on-demand base; Fargate providers associated
@@ -169,9 +173,10 @@ capacity providers (FARGATE_SPOT), container health checks, tags/cost allocation
 definition cleanup, JSON logging — on top of the security batch (audit log, API tokens,
 CSP/CSRF/rate limits, non-root container, JSON Schema, readiness endpoint). Next up:
 
-1. **ALB creation** — create listener/rule/TG from the manifest, not just reference.
-2. **Generic OIDC** — Google/Okta/Dex login next to GitHub OAuth.
-3. **Deployment timeline UI** — per-app timeline with commit, images, duration, outcome
+1. **Generic OIDC** — Google/Okta/Dex login next to GitHub OAuth.
+2. **Deployment timeline UI** — per-app timeline with commit, images, duration, outcome
    (data already persisted in sync history).
-4. **One-off tasks / jobs** — `ECSTask` kind for migrations and batch jobs, "run now" in UI.
-5. **EFS volumes & FireLens sidecars** — round out task definition coverage.
+3. **One-off tasks / jobs** — `ECSTask` kind for migrations and batch jobs, "run now" in UI.
+4. **EFS volumes & FireLens sidecars** — round out task definition coverage.
+5. **ALB request-count autoscaling** — target-tracking on `ALBRequestCountPerTarget`
+   (now that managed target groups exist).

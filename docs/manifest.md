@@ -59,10 +59,27 @@ spec:
       maxCount: 10
       targetCpu: 60
       targetMemory: 70
-    loadBalancer:                       # attach to an existing target group
-      targetGroupArn: arn:aws:elasticloadbalancing:...
+    loadBalancer:
       containerName: web                # defaults to the first container
       containerPort: 8080
+      # EITHER reference an existing target group:
+      targetGroupArn: arn:aws:elasticloadbalancing:...
+      # OR let Andro-CD create the TG + listener rule (managed mode):
+      # create:
+      #   listenerArn: arn:aws:elasticloadbalancing:...:listener/app/main/abc/def
+      #   port: 8080                    # TG port; defaults to containerPort
+      #   protocol: HTTP                # towards the targets: HTTP | HTTPS
+      #   rule:
+      #     priority: 10                # unique per listener
+      #     hostHeader: api.example.com # and/or pathPattern
+      #     pathPattern: /api/*
+      #   healthCheck:
+      #     path: /health
+      #     interval: 30
+      #     timeout: 5
+      #     healthyThreshold: 3
+      #     unhealthyThreshold: 3
+      #     matcher: "200-399"
     capacityProviders:                  # weighted strategy instead of launchType
       - provider: FARGATE_SPOT
         weight: 3
