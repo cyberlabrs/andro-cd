@@ -75,12 +75,19 @@ spec:
 - Multiple YAML documents per file are allowed (`---` separated).
 - Files are discovered recursively under `GIT_PATH` (`*.yml` / `*.yaml`).
 
-### Other kinds & advanced fields (see `examples/advanced.yaml`)
+### Other kinds & advanced fields (see `examples/advanced.yaml`, `examples/cluster.yaml`)
 
 - **`ECSServiceSet`** (app-of-apps): `spec.generators[].values` + `spec.template` with
   `${var}` substitution → expands to N `ECSService` apps.
 - **`ECSScheduledTask`**: `spec.schedule.{expression, roleArn, enabled}` — cron/rate via
   EventBridge Scheduler running the task definition.
+- **`ECSCluster`**: manage the cluster itself as a GitOps app — `spec.containerInsights`
+  (disabled/enabled/enhanced), `spec.capacityProviders` (attached to the cluster),
+  `spec.defaultCapacityProviderStrategy` (default for services without their own),
+  `spec.serviceConnectNamespace` (Cloud Map), labels → tags. `spec.cluster` defaults to
+  `metadata.name`; no `network`/`taskDefinition` needed. Pair with waves: cluster in
+  wave 0, services in wave 1. Prune deletes the cluster but refuses while it still has
+  services or running tasks.
 - **`spec.wave`** (int, default 0): sync waves — a wave deploys only after all lower waves
   are Synced + Healthy.
 - **`spec.hooks.preSync/postSync`**: `{command, container?, timeoutSeconds}` — one-off ECS task
@@ -89,8 +96,11 @@ spec:
   at sync time (reliable drift detection + immutable deploys).
 - **`service.autoscaling`**: `{minCount, maxCount, targetCpu?, targetMemory?}` — target-tracking
   Application Auto Scaling; the autoscaler then owns `desiredCount`.
-- **`service.loadBalancer`**: `{targetGroupArn, containerName?, containerPort}` — attach the
-  service to an existing target group.
+- **`service.loadBalancer`**: two modes. Reference —
+  `{targetGroupArn, containerName?, containerPort}` attaches to an existing target group.
+  Managed — `{containerPort, create: {listenerArn, port?, protocol?, rule, healthCheck?}}`
+  creates and reconciles an ip-type target group + host/path listener rule on an existing
+  ALB listener (the ALB itself stays your infra; prune removes the rule + TG).
 - **`service.capacityProviders`**: `[{provider, weight?, base?}]` — weighted capacity
   provider strategy (e.g. `FARGATE_SPOT` 3 : `FARGATE` 1 with base 1) instead of plain
   `launchType`; Fargate providers are associated automatically on cluster creation.
@@ -214,6 +224,10 @@ SQLite / no-DB deployments are single-instance and always leader.
 `ecs:CreateCluster`, `ecs:DescribeClusters`, `ecs:RegisterTaskDefinition`,
 `ecs:DescribeTaskDefinition`, `ecs:CreateService`, `ecs:UpdateService`,
 `ecs:DescribeServices`, `iam:PassRole` (for task/execution roles),
+`ecs:UpdateCluster` + `ecs:PutClusterCapacityProviders` + `ecs:DeleteCluster`
+(kind `ECSCluster`),
+`elasticloadbalancing:*TargetGroup*` + `*Rule*` + `AddTags` + `ec2:DescribeSubnets`
+(managed load balancers, `loadBalancer.create`),
 `logs:CreateLogGroup` (when `logGroup` is used),
 `logs:DescribeLogStreams` + `logs:GetLogEvents` (logs tail in the UI).
 
