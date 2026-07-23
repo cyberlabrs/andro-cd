@@ -599,7 +599,30 @@ def sync_single(name: str) -> dict:
         if not app:
             raise KeyError(name)
         app.sync_paused = False  # manual sync resumes auto-sync after a rollback
+        repo = next(
+            (r for r in store.repos.values() if r["url"] == app.repo), None
+        )
     _clear_backoff(name)
+    # Refresh this app's repo so a manual sync always picks up the latest commit,
+    # rather than whatever was cached by the last background reconcile loop.
+    if repo:
+        try:
+            head = git_sync.sync_repo(repo)
+            docs = git_sync.load_manifest_docs(repo)
+        except Exception as e:
+            with store.lock():
+                repo["error"] = str(e)[:500]
+                repo["lastPoll"] = now()
+            log.error("git sync failed for %s: %s", repo["url"], e)
+        else:
+            with store.lock():
+                repo.update(head)
+                repo["error"] = None
+                repo["lastPoll"] = now()
+                _load_apps([(repo, rel, doc) for rel, doc in docs], set())
+                app = store.apps.get(name)
+                if not app:
+                    raise KeyError(name)
     _sync_app(app)  # lock-free AWS I/O
     with store.lock():
         return app.detail()

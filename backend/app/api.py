@@ -220,9 +220,7 @@ async def stream_logs(name: str, request: Request, container: str | None = None)
     manifest = _get_manifest(name)
 
     async def gen():
-        # Bug #23: start with the last 2 minutes only. Loading 10 minutes of history for
-        # busy services flooded the stream and older events were silently truncated.
-        cursor = int((time.time() - 120) * 1000)
+        cursor = int((time.time() - 900) * 1000)
         seen: dict[str, None] = {}
         started = time.monotonic()
         while time.monotonic() - started < STREAM_MAX_SECONDS:
