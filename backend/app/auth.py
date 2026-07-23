@@ -175,15 +175,16 @@ def callback(request: Request, code: str = "", state: str = ""):
 
 @router.get("/me")
 def me(request: Request):
-    if settings.auth_mode != "github":
+    if not settings.auth_enabled:
         return {"mode": "none", "authenticated": True, "user": None, "role": "admin"}
+    mode = settings.auth_mode   # "github" | "oidc"
     user = verify_session(request.cookies.get(SESSION_COOKIE, ""))
     if user:
         role = role_for(user["login"])   # always recomputed from current config
-        return {"mode": "github", "authenticated": True, "role": role,
+        return {"mode": mode, "authenticated": True, "role": role,
                 "user": {"login": user["login"], "name": user.get("name"),
                          "avatar": user.get("avatar"), "role": role}}
-    return {"mode": "github", "authenticated": False, "user": None, "role": None}
+    return {"mode": mode, "authenticated": False, "user": None, "role": None}
 
 
 @router.post("/logout")

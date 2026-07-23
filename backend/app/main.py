@@ -116,7 +116,11 @@ AUTH_EXEMPT_EXACT = {"/api/docs", "/api/schema"}
 AUTH_EXEMPT_PREFIXES = ("/api/auth/", "/api/webhook/", "/api/docs/")
 
 # Security headers on every response. The CSP allows only same-origin scripts;
-# inline styles are needed by React style props; avatars come from GitHub.
+# inline styles are needed by React style props. Avatar image sources depend on the
+# auth mode — GitHub's CDN, or (OIDC) an arbitrary provider/CDN over https.
+_IMG_SRC = ("'self' data: https:" if settings.auth_mode == "oidc"
+            else "'self' data: https://avatars.githubusercontent.com")
+_FORM_ACTION = "'self' https://github.com" if settings.auth_mode == "github" else "'self'"
 SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
@@ -124,11 +128,22 @@ SECURITY_HEADERS = {
     "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
     "Content-Security-Policy": (
         "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
-        "img-src 'self' data: https://avatars.githubusercontent.com; "
-        "connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; "
-        "form-action 'self' https://github.com"
+        f"img-src {_IMG_SRC}; "
+        f"connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; "
+        f"form-action {_FORM_ACTION}"
     ),
 }
+
+
+def _auth_misconfig() -> str | None:
+    """Human-readable reason the configured auth mode can't work, or None if OK."""
+    if settings.auth_mode == "github" and not (settings.github_client_id and settings.github_client_secret):
+        return "auth misconfigured: GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET missing"
+    if settings.auth_mode == "oidc" and not (
+        settings.oidc_issuer and settings.oidc_client_id and settings.oidc_client_secret
+    ):
+        return "auth misconfigured: OIDC_ISSUER / OIDC_CLIENT_ID / OIDC_CLIENT_SECRET missing"
+    return None
 
 
 def _csrf_origin_ok(request: Request) -> bool:
@@ -156,7 +171,7 @@ async def auth_middleware(request: Request, call_next):
             and not _csrf_origin_ok(request)):
         return JSONResponse({"detail": "cross-origin request rejected"}, status_code=403)
 
-    if settings.auth_mode == "github":
+    if settings.auth_enabled:
         exempt = path in AUTH_EXEMPT_EXACT or path.startswith(AUTH_EXEMPT_PREFIXES)
         if path.startswith("/api") and not exempt:
             # Static API tokens (CI/automation): Authorization: Bearer <token>
@@ -166,11 +181,9 @@ async def auth_middleware(request: Request, call_next):
             if token_role:
                 request.state.user = {"login": f"api-token:{token[:6]}", "api_role": token_role}
             else:
-                if not settings.github_client_id or not settings.github_client_secret:
-                    return JSONResponse(
-                        {"detail": "auth misconfigured: GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET missing"},
-                        status_code=503,
-                    )
+                misconfig = _auth_misconfig()
+                if misconfig:
+                    return JSONResponse({"detail": misconfig}, status_code=503)
                 session = request.cookies.get(auth.SESSION_COOKIE, "")
                 user = auth.verify_session(session)
                 if not user:
@@ -187,6 +200,10 @@ async def auth_middleware(request: Request, call_next):
 
 app.include_router(router)
 app.include_router(auth.router)
+# OIDC routes are always mounted but self-guard via _require_configured (404 unless
+# AUTH_MODE=oidc), mirroring how the GitHub OAuth routes behave.
+from . import oidc  # noqa: E402
+app.include_router(oidc.router)
 
 
 # ---------- public routes ----------

@@ -52,6 +52,25 @@ class Settings:
     github_allowed_users: frozenset = frozenset(
         u.strip().lower() for u in os.getenv("GITHUB_ALLOWED_USERS", "").split(",") if u.strip()
     )
+    # Generic OIDC (AUTH_MODE=oidc) — Google, Okta, Dex, Keycloak, Auth0, …
+    oidc_issuer: str = os.getenv("OIDC_ISSUER", "").rstrip("/")
+    oidc_client_id: str = os.getenv("OIDC_CLIENT_ID", "")
+    oidc_client_secret: str = os.getenv("OIDC_CLIENT_SECRET", "")
+    oidc_scopes: str = os.getenv("OIDC_SCOPES", "openid email profile").strip()
+    # which id-token/userinfo claim becomes the username (login) used for RBAC
+    oidc_username_claim: str = os.getenv("OIDC_USERNAME_CLAIM", "email").strip()
+    oidc_groups_claim: str = os.getenv("OIDC_GROUPS_CLAIM", "groups").strip()
+    oidc_allowed_users: frozenset = frozenset(
+        u.strip().lower() for u in os.getenv("OIDC_ALLOWED_USERS", "").split(",") if u.strip()
+    )
+    # email-domain allowlist, e.g. "example.com,corp.example.com"
+    oidc_allowed_domains: frozenset = frozenset(
+        d.strip().lower().lstrip("@") for d in os.getenv("OIDC_ALLOWED_DOMAINS", "").split(",") if d.strip()
+    )
+    # group allowlist (matched against the groups claim)
+    oidc_allowed_groups: frozenset = frozenset(
+        g.strip() for g in os.getenv("OIDC_ALLOWED_GROUPS", "").split(",") if g.strip()
+    )
     rbac_admins: frozenset = frozenset(
         u.strip().lower() for u in os.getenv("RBAC_ADMINS", "").split(",") if u.strip()
     )
@@ -81,17 +100,28 @@ class Settings:
     def cookie_secure(self) -> bool:
         return self.public_url.startswith("https://")
 
+    @property
+    def auth_enabled(self) -> bool:
+        """True when logins are required (github or oidc), False for AUTH_MODE=none."""
+        return self.auth_mode in ("github", "oidc")
+
     def startup_problems(self) -> list[str]:
         """Config sanity checks — logged as warnings at startup (fail fast on nonsense)."""
         problems: list[str] = []
-        if self.auth_mode not in ("none", "github"):
-            problems.append(f"AUTH_MODE='{self.auth_mode}' is not supported (use 'none' or 'github')")
+        if self.auth_mode not in ("none", "github", "oidc"):
+            problems.append(f"AUTH_MODE='{self.auth_mode}' is not supported (use 'none', 'github' or 'oidc')")
         if self.auth_mode == "github" and not (self.github_client_id and self.github_client_secret):
             problems.append("AUTH_MODE=github but GITHUB_CLIENT_ID/GITHUB_CLIENT_SECRET are missing — all API requests will fail")
-        if self.auth_mode == "github" and not os.getenv("SESSION_SECRET"):
+        if self.auth_mode == "oidc" and not (self.oidc_issuer and self.oidc_client_id and self.oidc_client_secret):
+            problems.append("AUTH_MODE=oidc but OIDC_ISSUER/OIDC_CLIENT_ID/OIDC_CLIENT_SECRET are missing — all API requests will fail")
+        if self.auth_mode in ("github", "oidc") and not os.getenv("SESSION_SECRET"):
             problems.append("SESSION_SECRET not set — sessions and encrypted AWS profiles will not survive restarts")
         if self.auth_mode == "none" and self.public_url.startswith("https://"):
             problems.append("AUTH_MODE=none on a public HTTPS URL — anyone who can reach the UI has full admin access")
+        if self.auth_mode == "oidc" and not (
+            self.oidc_allowed_users or self.oidc_allowed_domains or self.oidc_allowed_groups
+        ):
+            problems.append("AUTH_MODE=oidc without OIDC_ALLOWED_USERS/DOMAINS/GROUPS — anyone with an account at the provider can log in")
         if self.sync_interval < 10:
             problems.append(f"SYNC_INTERVAL={self.sync_interval}s is very aggressive — risks AWS/git rate limits")
         if self.dry_run:

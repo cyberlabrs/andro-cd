@@ -8,7 +8,7 @@ scheduled tasks.
 - **Backend:** Python (FastAPI + boto3)
 - **Frontend:** React + Vite (this UI)
 - **Deploy:** single Docker image with an optional Postgres sidecar
-- **Auth:** GitHub OAuth with RBAC (viewer / operator / admin)
+- **Auth:** GitHub OAuth or generic OIDC, with RBAC (viewer / operator / admin)
 
 Everything below assumes you're viewing this in the running service — links jump to
 sections, screenshots reflect the current UI.
@@ -601,6 +601,27 @@ Push events on any tracked branch trigger a reconcile immediately. HMAC-SHA256 v
 Sessions live in signed httpOnly cookies (`androcd_session`). `SESSION_SECRET` should be
 set explicitly so sessions survive restarts.
 
+### Generic OIDC
+
+`AUTH_MODE=oidc` supports any spec-compliant provider (Google, Okta, Keycloak, Dex,
+Auth0, Azure AD) via the discovery document:
+
+```bash
+OIDC_ISSUER=https://accounts.google.com
+OIDC_CLIENT_ID=...
+OIDC_CLIENT_SECRET=...
+OIDC_SCOPES="openid email profile"        # add "groups" for group allowlists
+OIDC_USERNAME_CLAIM=email                 # claim used as the login for RBAC
+OIDC_ALLOWED_USERS=alice@example.com      # and/or OIDC_ALLOWED_DOMAINS / _GROUPS
+```
+
+- Register the redirect URI `<PUBLIC_URL>/api/auth/oidc/callback` with the provider.
+- Authorization code flow with PKCE + nonce; the id token is verified against the
+  provider's JWKS (signature, issuer, audience, expiry).
+- Each configured allowlist must pass (fail closed). With none set, anyone with an
+  account at the provider can log in — flagged by a startup warning.
+- The username claim is the login used by RBAC and the audit log.
+
 ### RBAC
 
 Three roles:
@@ -713,10 +734,10 @@ before it can ever reach the reconciler.
 
 ## HTTP API
 
-All `/api/*` endpoints require authentication when `AUTH_MODE=github` — a session cookie
-or an `API_TOKENS` bearer token (except the OAuth flow, the HMAC-verified webhook, the
-public docs and `/api/schema`). `/healthz` and `/readyz` are always public; `/metrics`
-is public unless `METRICS_TOKEN` is set.
+All `/api/*` endpoints require authentication when `AUTH_MODE` is `github` or `oidc` — a
+session cookie or an `API_TOKENS` bearer token (except the auth flow, the HMAC-verified
+webhook, the public docs and `/api/schema`). `/healthz` and `/readyz` are always public;
+`/metrics` is public unless `METRICS_TOKEN` is set.
 
 | Method | Path | Role | Description |
 |---|---|---|---|
@@ -777,10 +798,16 @@ All environment variables. Set in `.env` (docker-compose loads it automatically)
 
 | Variable | Default | Description |
 |---|---|---|
-| `AUTH_MODE` | `none` | `github` enables OAuth login |
+| `AUTH_MODE` | `none` | `github` or `oidc` enables login |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | — | GitHub OAuth App credentials |
 | `GITHUB_ALLOWED_USERS` | — | Comma-separated username allowlist |
 | `GITHUB_ALLOWED_ORG` | — | Only members of this org may log in |
+| `OIDC_ISSUER` | — | OIDC provider issuer (discovery URL base) |
+| `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | — | OIDC client credentials |
+| `OIDC_SCOPES` | `openid email profile` | Requested scopes |
+| `OIDC_USERNAME_CLAIM` | `email` | Claim used as the login for RBAC |
+| `OIDC_ALLOWED_USERS` / `_DOMAINS` / `_GROUPS` | — | Login allowlists (each configured one must pass) |
+| `OIDC_GROUPS_CLAIM` | `groups` | Claim holding group membership |
 | `SESSION_SECRET` | random | Signs session cookies (set to keep sessions across restarts) |
 | `PUBLIC_URL` | `http://localhost:8080` | External URL — OAuth callback, CSRF checks, Secure cookies/HSTS |
 | `RBAC_ADMINS` | — | GitHub logins with admin role |

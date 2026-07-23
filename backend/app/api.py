@@ -20,7 +20,7 @@ ROLE_RANK = {"viewer": 0, "operator": 1, "admin": 2}
 
 
 def current_role(request: Request) -> str:
-    if settings.auth_mode != "github":
+    if not settings.auth_enabled:
         return "admin"
     from . import auth as auth_module
     user = getattr(request.state, "user", None) or {}
@@ -30,7 +30,7 @@ def current_role(request: Request) -> str:
 
 
 def require_role(request: Request, minimum: str) -> None:
-    if settings.auth_mode != "github":
+    if not settings.auth_enabled:
         return
     role = current_role(request)
     if ROLE_RANK.get(role, 0) < ROLE_RANK[minimum]:

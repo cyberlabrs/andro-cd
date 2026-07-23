@@ -131,7 +131,7 @@ export default function App() {
     );
   }
   if (!authenticated) {
-    return <LoginPage />;
+    return <LoginPage mode={auth.mode} />;
   }
 
   if (showDocs) {
@@ -230,7 +230,7 @@ export default function App() {
           >
             {theme === "dark" ? "☀" : "☾"}
           </button>
-          {auth.mode === "github" && auth.user && (
+          {auth.mode !== "none" && auth.user && (
             <span className="user-chip">
               {auth.user.avatar && <img className="avatar" src={auth.user.avatar} alt="" />}
               <span>{auth.user.login}</span>

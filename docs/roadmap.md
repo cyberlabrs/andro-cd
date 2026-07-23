@@ -13,21 +13,22 @@ The full, continuously updated list lives in
   (attach to an existing target group **or** create the target group + listener rule
   from the manifest), capacity providers (Fargate Spot), container health checks, ECR
   digest pinning, labels → AWS tags, task-definition cleanup, multi-account profiles
-- Security: GitHub OAuth + RBAC, API tokens, audit log, CSP/CSRF/rate limiting,
-  encrypted credentials, non-root container, JSON Schema publishing
+- Security: GitHub OAuth **and generic OIDC** (Google/Okta/Keycloak/Dex/Auth0/Azure AD)
+  + RBAC, API tokens, audit log, CSP/CSRF/rate limiting, encrypted credentials, non-root
+  container, JSON Schema publishing
 - Operations: HA leader election, dry-run mode, exponential backoff, batched AWS
   describes, parallel reconciliation, readiness probes, Prometheus metrics, Slack
   notifications, structured logging
 
 ## Next up
 
-1. **Generic OIDC** — Google/Okta/Dex login next to GitHub OAuth.
-2. **Deployment timeline UI** — per-app timeline with commit, images, duration and
+1. **Deployment timeline UI** — per-app timeline with commit, images, duration and
    outcome (the data is already persisted).
-3. **`ECSTask` kind** — one-off tasks/jobs with "run now" in the UI.
-4. **EFS volumes & FireLens sidecars** — rounding out task-definition coverage.
-5. **ALB request-count autoscaling** — target-tracking on `ALBRequestCountPerTarget`
+2. **`ECSTask` kind** — one-off tasks/jobs with "run now" in the UI.
+3. **EFS volumes & FireLens sidecars** — rounding out task-definition coverage.
+4. **ALB request-count autoscaling** — target-tracking on `ALBRequestCountPerTarget`
    (now that managed target groups exist).
+5. **Session refresh** — silently renew expiring sessions instead of forcing re-login.
 
 ## Contributing
 

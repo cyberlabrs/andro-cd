@@ -1,15 +1,41 @@
 # Security
 
-## Authentication (GitHub OAuth)
+## Authentication
 
-`AUTH_MODE=github` protects the UI and every `/api` route:
+Two login providers, selected with `AUTH_MODE`. Both protect the UI and every `/api`
+route, and both issue the same signed, httpOnly session cookie — set `SESSION_SECRET`
+explicitly so sessions survive restarts.
+
+### GitHub OAuth (`AUTH_MODE=github`)
 
 - `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` — from a GitHub OAuth App; callback URL is
   `<PUBLIC_URL>/api/auth/callback`.
 - `GITHUB_ALLOWED_USERS=alice,bob` and/or `GITHUB_ALLOWED_ORG=my-org` control who may
   log in.
-- Sessions are signed, httpOnly cookies. Set `SESSION_SECRET` explicitly so sessions
-  survive restarts.
+
+### Generic OIDC (`AUTH_MODE=oidc`)
+
+Works with any spec-compliant provider — Google, Okta, Keycloak, Dex, Auth0, Azure AD —
+via the discovery document (`/.well-known/openid-configuration`):
+
+```bash
+OIDC_ISSUER=https://accounts.google.com
+OIDC_CLIENT_ID=...
+OIDC_CLIENT_SECRET=...
+OIDC_SCOPES="openid email profile"        # add "groups" for group allowlists
+OIDC_USERNAME_CLAIM=email                 # claim used as the login for RBAC
+# who may log in — each configured allowlist must pass (fail closed):
+OIDC_ALLOWED_USERS=alice@example.com,bob@example.com
+OIDC_ALLOWED_DOMAINS=example.com
+OIDC_ALLOWED_GROUPS=platform,sre
+```
+
+- Register the redirect URI `<PUBLIC_URL>/api/auth/oidc/callback` with your provider.
+- The flow uses the authorization code grant with **PKCE** and a **nonce**; the id token
+  is fully verified against the provider's JWKS (signature, issuer, audience, expiry).
+- The username claim becomes the login used everywhere (RBAC, audit log). With no
+  allowlist configured, anyone with an account at the provider can log in — a startup
+  warning flags this.
 
 ## RBAC
 
@@ -25,9 +51,10 @@ RBAC_OPERATORS=bob,carol
 RBAC_DEFAULT_ROLE=viewer
 ```
 
-Without any RBAC vars, every logged-in user is admin (single-user convenience).
-Roles are evaluated on every request — changing the env vars takes effect without
-re-login.
+Values are matched against the login — the GitHub username, or the OIDC username claim
+(e.g. `alice@example.com`). Without any RBAC vars, every logged-in user is admin
+(single-user convenience). Roles are evaluated on every request — changing the env vars
+takes effect without re-login.
 
 ## API tokens (CI / automation)
 

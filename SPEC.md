@@ -182,10 +182,14 @@ Frontend is served from `/` (static build baked into the image).
 | `DATABASE_URL`  | sqlite in /tmp | persistence (Postgres in compose); sync history + app state survive restarts |
 | `WEBHOOK_SECRET` | —      | enables `/api/webhook/github` (GitHub webhook secret) |
 | `SLACK_WEBHOOK_URL` | —   | Slack notifications: sync done/failed, app degraded |
-| `AUTH_MODE`     | `none`  | `github` = require GitHub OAuth login for UI/API |
+| `AUTH_MODE`     | `none`  | `github` (GitHub OAuth) or `oidc` (generic OpenID Connect) login for UI/API |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | — | GitHub OAuth app credentials |
 | `GITHUB_ALLOWED_ORG` | —  | only members of this GitHub org may log in |
 | `GITHUB_ALLOWED_USERS` | — | comma-separated GitHub username allowlist |
+| `OIDC_ISSUER` / `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | — | OIDC provider (discovery-based) + client credentials |
+| `OIDC_SCOPES` | `openid email profile` | requested scopes (`groups` for group allowlists) |
+| `OIDC_USERNAME_CLAIM` | `email` | id-token claim used as the login for RBAC |
+| `OIDC_ALLOWED_USERS` / `OIDC_ALLOWED_DOMAINS` / `OIDC_ALLOWED_GROUPS` | — | login allowlists (each configured one must pass) |
 | `SESSION_SECRET` | random | signs session cookies; set it to keep sessions across restarts |
 | `RBAC_ADMINS`   | —       | GitHub logins with admin role (manage repos + everything) |
 | `RBAC_OPERATORS` | —      | GitHub logins with operator role (sync/rollback/prune) |

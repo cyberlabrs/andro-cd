@@ -213,7 +213,7 @@ export interface AuditEntry {
 export type Role = "viewer" | "operator" | "admin";
 
 export interface AuthInfo {
-  mode: "none" | "github";
+  mode: "none" | "github" | "oidc";
   authenticated: boolean;
   role: Role | null;
   user: { login: string; name: string | null; avatar: string | null; role?: Role } | null;

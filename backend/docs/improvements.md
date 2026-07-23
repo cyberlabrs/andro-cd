@@ -67,11 +67,12 @@ and roughly ordered by value/effort inside each group.
 
 ## 3. Security
 
-- **AuthN for the UI/API** *(GitHub OAuth done — `AUTH_MODE=github` + OAuth app credentials,
-  org/user allowlists, signed httpOnly session cookies; all `/api` routes protected except the
-  OAuth flow and the HMAC-verified webhook. API tokens for CI done — `API_TOKENS=token:role`
-  accepted as `Authorization: Bearer`)*. Still to do: generic OIDC (Google/Okta/Dex),
-  refresh of expired sessions.
+- **AuthN for the UI/API** *(done — GitHub OAuth (`AUTH_MODE=github`) and generic OIDC
+  (`AUTH_MODE=oidc`, discovery-based, PKCE + nonce + JWKS id-token verification; works with
+  Google/Okta/Keycloak/Dex/Auth0/Azure AD, with user/domain/group allowlists). Signed httpOnly
+  session cookies; all `/api` routes protected except the auth flow and the HMAC-verified
+  webhook. API tokens for CI — `API_TOKENS=token:role` as `Authorization: Bearer`)*.
+  Still to do: refresh of expired sessions.
 - **RBAC** *(done — viewer/operator/admin roles via `RBAC_ADMINS`/`RBAC_OPERATORS`/
   `RBAC_DEFAULT_ROLE`; enforced on API endpoints and reflected in the UI)*. Still to do:
   GitHub team-based mapping, per-project roles.
@@ -168,15 +169,16 @@ and roughly ordered by value/effort inside each group.
 
 ## Suggested next 5 (best value / effort)
 
-Latest batch done: HA leader election, values-file templating, sync windows, dry-run mode,
-capacity providers (FARGATE_SPOT), container health checks, tags/cost allocation, task
-definition cleanup, JSON logging — on top of the security batch (audit log, API tokens,
-CSP/CSRF/rate limits, non-root container, JSON Schema, readiness endpoint). Next up:
+Latest batch done: managed load balancers (ALB TG + listener rule creation), generic OIDC
+login, HA leader election, values-file templating, sync windows, dry-run mode, capacity
+providers (FARGATE_SPOT), container health checks, tags/cost allocation, task definition
+cleanup, JSON logging — on top of the security batch (audit log, API tokens, CSP/CSRF/rate
+limits, non-root container, JSON Schema, readiness endpoint). Next up:
 
-1. **Generic OIDC** — Google/Okta/Dex login next to GitHub OAuth.
-2. **Deployment timeline UI** — per-app timeline with commit, images, duration, outcome
+1. **Deployment timeline UI** — per-app timeline with commit, images, duration, outcome
    (data already persisted in sync history).
-3. **One-off tasks / jobs** — `ECSTask` kind for migrations and batch jobs, "run now" in UI.
-4. **EFS volumes & FireLens sidecars** — round out task definition coverage.
-5. **ALB request-count autoscaling** — target-tracking on `ALBRequestCountPerTarget`
+2. **One-off tasks / jobs** — `ECSTask` kind for migrations and batch jobs, "run now" in UI.
+3. **EFS volumes & FireLens sidecars** — round out task definition coverage.
+4. **ALB request-count autoscaling** — target-tracking on `ALBRequestCountPerTarget`
    (now that managed target groups exist).
+5. **Session refresh** — silently renew expiring sessions instead of forcing re-login.

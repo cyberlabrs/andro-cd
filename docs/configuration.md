@@ -23,10 +23,16 @@ which documents every variable with a secure-setup checklist.
 
 | Variable | Default | Description |
 |---|---|---|
-| `AUTH_MODE` | `none` | `github` enables OAuth login |
+| `AUTH_MODE` | `none` | `github` or `oidc` enables login |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | — | GitHub OAuth App credentials |
 | `GITHUB_ALLOWED_USERS` | — | Comma-separated allowlist |
 | `GITHUB_ALLOWED_ORG` | — | Restrict login to an org's members |
+| `OIDC_ISSUER` | — | OIDC provider issuer (discovery URL base) |
+| `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | — | OIDC client credentials |
+| `OIDC_SCOPES` | `openid email profile` | Requested scopes |
+| `OIDC_USERNAME_CLAIM` | `email` | Claim used as the login for RBAC |
+| `OIDC_ALLOWED_USERS` / `OIDC_ALLOWED_DOMAINS` / `OIDC_ALLOWED_GROUPS` | — | Login allowlists (each configured one must pass) |
+| `OIDC_GROUPS_CLAIM` | `groups` | Claim holding group membership |
 | `SESSION_SECRET` | random | Signs session cookies — set it for stable sessions |
 | `PUBLIC_URL` | `http://localhost:8080` | External URL: OAuth callback, CSRF, Secure cookies/HSTS |
 | `RBAC_ADMINS` / `RBAC_OPERATORS` / `RBAC_DEFAULT_ROLE` | — | Role assignment |
