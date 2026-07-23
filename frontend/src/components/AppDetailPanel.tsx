@@ -6,6 +6,7 @@ import { DiffTab } from "./DiffTab";
 import { LogsTab } from "./LogsTab";
 import { OverviewTab } from "./OverviewTab";
 import { StoppedTasksSection, TaskDefTab, TasksTab } from "./ResourceTabs";
+import { Timeline } from "./Timeline";
 
 interface Props {
   name: string;
@@ -157,26 +158,7 @@ export function AppDetailPanel({ name, canOperate, onClose, onChanged }: Props) 
             {tab === "Logs" && <LogsTab appName={name} />}
             {tab === "History" && (
               <section>
-                {history.length === 0 && <div className="muted">No sync history recorded yet.</div>}
-                {history.map((h) => (
-                  <div key={h.id} className="history-entry">
-                    <div className="history-head">
-                      <span className={h.status === "Succeeded" ? "ok-text" : "err-text"}>
-                        {h.status === "Succeeded" ? "✓" : "✗"} {h.status}
-                      </span>
-                      {h.commit && <span className="commit">{h.commit.slice(0, 8)}</span>}
-                      <span className="muted">
-                        {h.createdAt && new Date(h.createdAt).toLocaleString()}
-                      </span>
-                    </div>
-                    {h.actions.map((a, i) => (
-                      <div key={i} className="change ok">• {a}</div>
-                    ))}
-                    {h.status === "Error" && h.message && (
-                      <div className="change err">• {h.message}</div>
-                    )}
-                  </div>
-                ))}
+                <Timeline entries={history} />
               </section>
             )}
             {tab === "Manifest" && (

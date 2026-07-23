@@ -56,9 +56,11 @@ export interface HistoryEntry {
   id: number;
   app: string;
   commit: string | null;
-  status: "Succeeded" | "Error";
+  status: "Succeeded" | "Error" | "DryRun";
   message: string;
   actions: string[];
+  durationMs: number;
+  images: string[];
   createdAt: string | null;
 }
 

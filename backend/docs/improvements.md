@@ -99,8 +99,9 @@ and roughly ordered by value/effort inside each group.
   status, git poll errors, last poll timestamp; Grafana dashboard JSON still to do)*.
 - **Notifications** *(Slack done via `SLACK_WEBHOOK_URL` — sync succeeded/failed, app degraded;
   Discord/email/templating still to do)*.
-- **Deployment history & timeline UI** — per-app timeline of deployments with commit, image tags,
-  duration, outcome (DB now stores the raw data for this).
+- **Deployment history & timeline UI** *(done — the History tab renders a vertical timeline
+  of deployments: outcome (synced/failed/dry-run), commit, container images, duration and
+  actions per entry; sync duration + images persisted in `sync_history`)*.
 - **CloudWatch logs in UI** *(done — real-time streaming via SSE (`/logs/stream`) with follow
   mode, pause/resume, container selector; plus one-shot tail endpoint)*.
 - **Task-level view** *(done — Tasks tab: running tasks with status, health, IP, AZ, started
@@ -169,16 +170,16 @@ and roughly ordered by value/effort inside each group.
 
 ## Suggested next 5 (best value / effort)
 
-Latest batch done: managed load balancers (ALB TG + listener rule creation), generic OIDC
-login, HA leader election, values-file templating, sync windows, dry-run mode, capacity
-providers (FARGATE_SPOT), container health checks, tags/cost allocation, task definition
-cleanup, JSON logging — on top of the security batch (audit log, API tokens, CSP/CSRF/rate
-limits, non-root container, JSON Schema, readiness endpoint). Next up:
+Latest batch done: deployment timeline UI, managed load balancers (ALB TG + listener rule
+creation), generic OIDC login, HA leader election, values-file templating, sync windows,
+dry-run mode, capacity providers (FARGATE_SPOT), container health checks, tags/cost
+allocation, task definition cleanup, JSON logging — on top of the security batch (audit log,
+API tokens, CSP/CSRF/rate limits, non-root container, JSON Schema, readiness endpoint).
+Next up:
 
-1. **Deployment timeline UI** — per-app timeline with commit, images, duration, outcome
-   (data already persisted in sync history).
-2. **One-off tasks / jobs** — `ECSTask` kind for migrations and batch jobs, "run now" in UI.
-3. **EFS volumes & FireLens sidecars** — round out task definition coverage.
-4. **ALB request-count autoscaling** — target-tracking on `ALBRequestCountPerTarget`
+1. **One-off tasks / jobs** — `ECSTask` kind for migrations and batch jobs, "run now" in UI.
+2. **EFS volumes & FireLens sidecars** — round out task definition coverage.
+3. **ALB request-count autoscaling** — target-tracking on `ALBRequestCountPerTarget`
    (now that managed target groups exist).
-5. **Session refresh** — silently renew expiring sessions instead of forcing re-login.
+4. **Session refresh** — silently renew expiring sessions instead of forcing re-login.
+5. **Service Connect / Cloud Map** — service discovery config in the manifest.

@@ -310,6 +310,14 @@ def _refresh_app(app: AppState) -> None:
         notifier.notify(f":warning: *{app.name}* is degraded: {app.message}")
 
 
+def _manifest_images(app: AppState) -> list[str]:
+    """Container images from the manifest — recorded on each sync for the timeline."""
+    m = app.manifest
+    if not m or not m.spec.taskDefinition:
+        return []
+    return [c.image for c in m.spec.taskDefinition.containers]
+
+
 def _sync_app(app: AppState) -> None:
     """Runs one apply cycle for an app. Called WITHOUT the store lock."""
     if not app.manifest:
@@ -329,22 +337,27 @@ def _sync_app(app: AppState) -> None:
             app.last_commit = commit
             app.sync_status = "OutOfSync" if app.changes else "Synced"
         log.info("dry-run for %s: %s", app.name, "; ".join(planned))
-        db.record_sync(app.name, commit, "DryRun", planned, "dry-run: no changes applied")
+        db.record_sync(app.name, commit, "DryRun", planned, "dry-run: no changes applied",
+                       images=_manifest_images(app))
         _save(app)
         return
     started = time.monotonic()
+    images = _manifest_images(app)
     try:
         actions = reconciler.apply(app.manifest)
     except Exception as e:
+        elapsed = time.monotonic() - started
         with store.lock():
             app.sync_status, app.message = "Error", str(e)[:500]
         log.exception("sync failed for %s", app.name)
-        db.record_sync(app.name, commit, "Error", [], str(e)[:500])
+        db.record_sync(app.name, commit, "Error", [], str(e)[:500],
+                       duration_ms=int(elapsed * 1000), images=images)
         metrics.SYNC_TOTAL.labels(app=app.name, result="error").inc()
-        metrics.SYNC_DURATION.labels(app=app.name).observe(time.monotonic() - started)
+        metrics.SYNC_DURATION.labels(app=app.name).observe(elapsed)
         notifier.notify(f":x: *{app.name}* sync failed: {str(e)[:500]}")
         _record_failure(app.name)
         return
+    elapsed = time.monotonic() - started
     with store.lock():
         app.last_actions = actions or ["nothing to do"]
         app.last_synced = now()
@@ -352,13 +365,14 @@ def _sync_app(app: AppState) -> None:
     log.info("synced %s: %s", app.name, "; ".join(actions or ["nothing to do"]))
     _clear_backoff(app.name)
     metrics.SYNC_TOTAL.labels(app=app.name, result="success").inc()
-    metrics.SYNC_DURATION.labels(app=app.name).observe(time.monotonic() - started)
+    metrics.SYNC_DURATION.labels(app=app.name).observe(elapsed)
     if actions:
         commit_tag = f" @ `{commit[:8]}`" if commit else ""
         notifier.notify(f":rocket: *{app.name}* synced{commit_tag}: " + "; ".join(actions))
     _refresh_app(app)
     db.record_sync(app.name, commit, "Succeeded",
-                   app.last_actions, app.message)
+                   app.last_actions, app.message,
+                   duration_ms=int(elapsed * 1000), images=images)
     _save(app)
 
 

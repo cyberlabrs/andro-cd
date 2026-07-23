@@ -24,7 +24,7 @@ image, a React dashboard, and your manifests in Git as the single source of trut
     ---
 
     Sync & health per app, side-by-side diff, live CloudWatch logs (SSE), task
-    forensics, one-click sync/rollback/prune, dark mode, URL-shareable filters.
+    forensics, deployment timeline, one-click sync/rollback/prune, dark mode.
 
 -   :material-cube-outline:{ .lg .middle } **Four kinds**
 

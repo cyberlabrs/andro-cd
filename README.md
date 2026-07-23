@@ -18,7 +18,7 @@ task definitions, scheduled tasks and the clusters themselves, all declared in G
 - **Four kinds** — `ECSService`, `ECSScheduledTask` (EventBridge cron), `ECSServiceSet`
   (app-of-apps generators), `ECSCluster` (insights, capacity providers, Service Connect)
 - **Argo-style dashboard** — sync/health per app, side-by-side diff, live CloudWatch
-  logs (SSE), stopped-task forensics, one-click sync/rollback/prune, dark mode
+  logs (SSE), stopped-task forensics, deployment timeline, sync/rollback/prune, dark mode
 - **Production security** — GitHub OAuth + RBAC, API tokens for CI, audit log,
   CSP/CSRF/rate limiting, encrypted multi-account AWS profiles, non-root container
 - **Cost-aware** — Fargate Spot strategies, target-tracking autoscaling, labels → AWS

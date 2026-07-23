@@ -19,16 +19,17 @@ The full, continuously updated list lives in
 - Operations: HA leader election, dry-run mode, exponential backoff, batched AWS
   describes, parallel reconciliation, readiness probes, Prometheus metrics, Slack
   notifications, structured logging
+- UI: Argo-style dashboard, side-by-side diff, live logs, task forensics, **deployment
+  timeline** (outcome, commit, images, duration per deploy), dark mode, URL-shared filters
 
 ## Next up
 
-1. **Deployment timeline UI** — per-app timeline with commit, images, duration and
-   outcome (the data is already persisted).
-2. **`ECSTask` kind** — one-off tasks/jobs with "run now" in the UI.
-3. **EFS volumes & FireLens sidecars** — rounding out task-definition coverage.
-4. **ALB request-count autoscaling** — target-tracking on `ALBRequestCountPerTarget`
+1. **`ECSTask` kind** — one-off tasks/jobs with "run now" in the UI.
+2. **EFS volumes & FireLens sidecars** — rounding out task-definition coverage.
+3. **ALB request-count autoscaling** — target-tracking on `ALBRequestCountPerTarget`
    (now that managed target groups exist).
-5. **Session refresh** — silently renew expiring sessions instead of forcing re-login.
+4. **Session refresh** — silently renew expiring sessions instead of forcing re-login.
+5. **Service Connect / Cloud Map** — service discovery config in the manifest.
 
 ## Contributing
 

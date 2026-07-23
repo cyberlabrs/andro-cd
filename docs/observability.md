@@ -53,8 +53,12 @@ look when a deployment is crash-looping.
 `LOG_FORMAT=json` switches controller logs to JSON (`ts`, `level`, `logger`, `msg`,
 `exc`) for CloudWatch Logs Insights / Loki ingestion.
 
-## Sync history & audit
+## Deployment timeline & audit
 
-Per-app sync history (commit, actions, outcome, message) persists in the database and
-is shown in the **History** tab. The [audit log](security.md#audit-log) adds the
-who/when/from-where dimension.
+The **History** tab renders a per-app **deployment timeline** — a vertical list of every
+sync, newest first, each showing the outcome (synced / failed / dry-run), the Git commit,
+the container images deployed, the duration, and the actions performed (or the error). The
+raw data (`commit`, `actions`, `outcome`, `message`, `durationMs`, `images`) persists in
+the `sync_history` table and is served by `GET /api/apps/{name}/history`.
+
+The [audit log](security.md#audit-log) adds the who/when/from-where dimension on top.

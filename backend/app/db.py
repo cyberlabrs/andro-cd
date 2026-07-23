@@ -25,6 +25,9 @@ class SyncRecord(Base):
     status: Mapped[str] = mapped_column(String(32))
     message: Mapped[str] = mapped_column(Text, default="")
     actions: Mapped[str] = mapped_column(Text, default="[]")
+    # timeline extras
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    images: Mapped[str] = mapped_column(Text, default="[]")   # container images at sync time
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -37,6 +40,8 @@ class SyncRecord(Base):
             "status": self.status,
             "message": self.message,
             "actions": json.loads(self.actions),
+            "durationMs": self.duration_ms or 0,
+            "images": json.loads(self.images or "[]"),
             "createdAt": self.created_at.isoformat() if self.created_at else None,
         }
 
@@ -160,6 +165,10 @@ def _migrate(engine) -> None:
             "github_installation_id": "VARCHAR(64) DEFAULT ''",
             "github_private_key": "TEXT DEFAULT ''",
         },
+        "sync_history": {
+            "duration_ms": "INTEGER DEFAULT 0",
+            "images": "TEXT DEFAULT '[]'",
+        },
         "app_state": {
             "last_commit": "VARCHAR(64) DEFAULT ''",
             "sync_paused": "BOOLEAN DEFAULT FALSE",
@@ -239,7 +248,8 @@ def ready() -> bool:
 
 
 def record_sync(app_name: str, commit: Optional[str], status: str,
-                actions: list[str], message: str) -> None:
+                actions: list[str], message: str,
+                duration_ms: int = 0, images: Optional[list[str]] = None) -> None:
     if not _Session:
         return
     try:
@@ -247,6 +257,7 @@ def record_sync(app_name: str, commit: Optional[str], status: str,
             s.add(SyncRecord(
                 app_name=app_name, commit=commit, status=status,
                 message=message[:2000], actions=json.dumps(actions),
+                duration_ms=int(duration_ms), images=json.dumps(images or []),
             ))
     except Exception as e:
         log.error("failed to record sync for %s: %s", app_name, e)
