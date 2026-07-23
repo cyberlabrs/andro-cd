@@ -5,6 +5,15 @@ All notable changes are documented here. The format follows
 [Semantic Versioning](https://semver.org/). Entries are generated automatically by
 [release-please](https://github.com/googleapis/release-please).
 
+## [0.3.0](https://github.com/cyberlabrs/andro-cd/compare/v0.2.0...v0.3.0) (2026-07-23)
+
+
+### Features
+
+* add ECSTask kind for one-off tasks with run-now ([a22081c](https://github.com/cyberlabrs/andro-cd/commit/a22081cb90c4fedb55b9dcfb9eb883ddca4e3b0e))
+* add generic OIDC login (AUTH_MODE=oidc) ([2f63f72](https://github.com/cyberlabrs/andro-cd/commit/2f63f725a81f80b37c283caffd7997bcf6f3a98c))
+* deployment timeline in the History tab ([31fdf54](https://github.com/cyberlabrs/andro-cd/commit/31fdf542df025cff7871928c357662962cabfc3f))
+
 ## [0.2.0](https://github.com/cyberlabrs/andro-cd/compare/v0.1.0...v0.2.0) (2026-07-22)
 
 
