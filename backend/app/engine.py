@@ -641,6 +641,27 @@ def prune_single(name: str) -> dict:
     return detail
 
 
+def run_single(name: str, count: int | None = None) -> dict:
+    """'Run now' for an ECSTask: launch the task definition once, off-lock."""
+    with store.lock():
+        app = store.apps.get(name)
+        if not app or not app.manifest:
+            raise KeyError(name)
+        manifest = app.manifest
+    if manifest.kind != "ECSTask":
+        raise ValueError("run is only supported for kind ECSTask")
+    if settings.dry_run:
+        return {"started": 0, "tasks": [], "dryRun": True}
+    result = reconciler.run_task_now(manifest, count)   # AWS call, no lock
+    commit = next((r.get("commit") for r in store.repos.values() if r["url"] == app.repo), None)
+    db.record_sync(name, commit, "Succeeded",
+                   [f"ran task ({result['started']} task(s) started)"],
+                   "manual run", images=_manifest_images(app))
+    log.info("ran task %s on demand: %d task(s)", name, result["started"])
+    _refresh_app(app)
+    return result
+
+
 # ---------- HA / leader election ----------
 # With Postgres, a session-scoped advisory lock elects exactly one applying
 # replica; standbys keep polling git and refreshing diffs (read-only) so their

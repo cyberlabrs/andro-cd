@@ -49,7 +49,10 @@ and roughly ordered by value/effort inside each group.
   rollback + `minimumHealthyPercent`/`maximumPercent` is done — on by default via
   `service.circuitBreaker` / `service.rollbackOnFailure` in the manifest)*.
 - **Scheduled tasks (cron)** *(done — `ECSScheduledTask` kind via EventBridge Scheduler: expression, roleArn, enabled toggle)*.
-- **One-off tasks / jobs** — `ECSTask` kind for migrations and batch jobs, with "run now" in UI.
+- **One-off tasks / jobs** *(done — `ECSTask` kind: reconciles the cluster + task definition
+  only; "Run now" button / `POST /api/apps/{name}/run` launches it, or `runPolicy.runOnSync`
+  runs it on every task-def change (migrations). Runs tagged by `startedBy`, shown in the Tasks
+  tab with exit codes; health tracks the last run)*.
 - **Service Connect / Cloud Map** — service discovery config in the manifest.
 - **Volumes** — EFS volumes and bind mounts in the task definition.
 - **Sidecars & FireLens** — first-class log-router sidecar config for shipping to Datadog/ES.
@@ -170,16 +173,16 @@ and roughly ordered by value/effort inside each group.
 
 ## Suggested next 5 (best value / effort)
 
-Latest batch done: deployment timeline UI, managed load balancers (ALB TG + listener rule
-creation), generic OIDC login, HA leader election, values-file templating, sync windows,
-dry-run mode, capacity providers (FARGATE_SPOT), container health checks, tags/cost
-allocation, task definition cleanup, JSON logging — on top of the security batch (audit log,
-API tokens, CSP/CSRF/rate limits, non-root container, JSON Schema, readiness endpoint).
-Next up:
+Latest batch done: `ECSTask` kind (one-off jobs + run-now), deployment timeline UI, managed
+load balancers (ALB TG + listener rule creation), generic OIDC login, HA leader election,
+values-file templating, sync windows, dry-run mode, capacity providers (FARGATE_SPOT),
+container health checks, tags/cost allocation, task definition cleanup, JSON logging — on top
+of the security batch (audit log, API tokens, CSP/CSRF/rate limits, non-root container, JSON
+Schema, readiness endpoint). Next up:
 
-1. **One-off tasks / jobs** — `ECSTask` kind for migrations and batch jobs, "run now" in UI.
-2. **EFS volumes & FireLens sidecars** — round out task definition coverage.
-3. **ALB request-count autoscaling** — target-tracking on `ALBRequestCountPerTarget`
+1. **EFS volumes & FireLens sidecars** — round out task definition coverage.
+2. **ALB request-count autoscaling** — target-tracking on `ALBRequestCountPerTarget`
    (now that managed target groups exist).
+3. **Service Connect / Cloud Map** — service discovery config in the manifest.
 4. **Session refresh** — silently renew expiring sessions instead of forcing re-login.
-5. **Service Connect / Cloud Map** — service discovery config in the manifest.
+5. **Grafana dashboard JSON** — ship a ready-made dashboard for the Prometheus metrics.

@@ -159,6 +159,39 @@ spec:
 
 The scheduler role needs `ecs:RunTask` plus `iam:PassRole` for the task's roles.
 
+## `kind: ECSTask`
+
+A one-off task or job — migrations, batch work — with no long-running service:
+
+```yaml
+apiVersion: andro-cd/v1
+kind: ECSTask
+metadata:
+  name: db-migrate
+spec:
+  cluster: batch
+  service: {launchType: FARGATE}       # launch settings for the run
+  runPolicy:
+    runOnSync: true                     # run once whenever the task definition changes
+    count: 1                            # tasks per run (1–10)
+  network:
+    subnets: [subnet-aaa]
+    securityGroups: [sg-0ccc]
+  taskDefinition:
+    containers:
+      - name: migrate
+        image: 123.dkr.ecr.us-east-1.amazonaws.com/api:latest
+        command: ["python", "manage.py", "migrate"]
+```
+
+- Andro-CD reconciles only the **cluster + task definition** — sync status is "Synced"
+  when the definition is registered and current.
+- Launch it on demand with the **Run now** button (or `POST /api/apps/{name}/run`,
+  optional `{count}`), or automatically with `runPolicy.runOnSync: true`.
+- Runs are tagged with `startedBy=androcd-task-<name>` and show up in the **Tasks** tab
+  with exit codes; health reflects the last run's outcome.
+- Prune is a no-op (a task owns no long-lived resource; task definitions are kept).
+
 ## `kind: ECSServiceSet` (app-of-apps)
 
 Generate N applications from one template:

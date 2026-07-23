@@ -329,6 +329,25 @@ async def prune_app(name: str, request: Request):
         raise HTTPException(400, str(e))
 
 
+class RunIn(BaseModel):
+    count: int | None = None
+
+
+@router.post("/apps/{name}/run")
+async def run_app(name: str, request: Request, body: RunIn | None = None):
+    """Run now — launch an ECSTask's task definition once."""
+    require_role(request, "operator")
+    audit(request, "app.run", name)
+    try:
+        return await asyncio.to_thread(engine.run_single, name, (body.count if body else None))
+    except KeyError:
+        raise HTTPException(404, f"app '{name}' not found")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(502, str(e)[:400])
+
+
 @router.post("/refresh")
 async def refresh(request: Request):
     require_role(request, "operator")

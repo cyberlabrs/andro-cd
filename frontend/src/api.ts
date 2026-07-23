@@ -61,6 +61,15 @@ export const rollbackTo = (name: string, revision: number) =>
   });
 export const pruneApp = (name: string) =>
   request<AppDetail>(`/api/apps/${encodeURIComponent(name)}/prune`, { method: "POST" });
+export const runTask = (name: string, count?: number) =>
+  request<{ started: number; tasks: string[]; dryRun?: boolean }>(
+    `/api/apps/${encodeURIComponent(name)}/run`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(count ? { count } : {}),
+    }
+  );
 export const fetchResources = (name: string) =>
   request<Resources>(`/api/apps/${encodeURIComponent(name)}/resources`);
 export const logStreamUrl = (name: string, container?: string) =>

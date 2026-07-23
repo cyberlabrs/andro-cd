@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { fetchApp, fetchHistory, fetchResources, pruneApp, syncApp } from "../api";
+import { fetchApp, fetchHistory, fetchResources, pruneApp, runTask, syncApp } from "../api";
 import type { AppDetail, HistoryEntry, Resources } from "../types";
 import { HealthBadge, SyncBadge } from "./StatusBadge";
 import { DiffTab } from "./DiffTab";
@@ -69,6 +69,23 @@ export function AppDetailPanel({ name, canOperate, onClose, onChanged }: Props) 
     }
   };
 
+  const [running, setRunning] = useState(false);
+  const onRun = async () => {
+    if (!window.confirm(`Run the task '${name}' now?`)) return;
+    setRunning(true);
+    setError(null);
+    try {
+      const r = await runTask(name);
+      if (r.dryRun) setError("Dry-run mode — task not actually started.");
+      setTab("Tasks");
+      setTimeout(loadResources, 1500);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setRunning(false);
+    }
+  };
+
   return (
     <div className="overlay" onClick={onClose}>
       <div className="panel panel-wide" onClick={(e) => e.stopPropagation()}>
@@ -99,6 +116,16 @@ export function AppDetailPanel({ name, canOperate, onClose, onChanged }: Props) 
                 }}
               >
                 Prune
+              </button>
+            )}
+            {app?.kind === "ECSTask" && app?.syncStatus !== "Orphaned" && (
+              <button
+                className="btn"
+                onClick={onRun}
+                disabled={running || !canOperate}
+                title={canOperate ? "Run this task definition once" : "requires operator role"}
+              >
+                {running ? "Running…" : "▶ Run now"}
               </button>
             )}
             <button

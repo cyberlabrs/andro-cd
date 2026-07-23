@@ -142,7 +142,7 @@ spec:
 
 ```yaml
 apiVersion: andro-cd/v1
-kind: ECSService | ECSScheduledTask | ECSServiceSet | ECSCluster
+kind: ECSService | ECSScheduledTask | ECSTask | ECSServiceSet | ECSCluster
 metadata:
   name: my-app                          # unique across all repos
   labels:                               # optional; shown as chips, filterable in the UI
@@ -260,6 +260,38 @@ spec:
 
 The scheduler role needs `ecs:RunTask` on the task definition plus `iam:PassRole` for the
 task's execution/task roles. See the AWS docs for the exact trust policy.
+
+### `kind: ECSTask`
+
+A one-off task/job (migrations, batch) with no long-running service:
+
+```yaml
+apiVersion: andro-cd/v1
+kind: ECSTask
+metadata:
+  name: db-migrate
+spec:
+  cluster: batch
+  service: {launchType: FARGATE}
+  runPolicy:
+    runOnSync: true          # run once whenever the task definition changes
+    count: 1                 # tasks per run (1–10)
+  network:
+    subnets: [subnet-aaa]
+    securityGroups: [sg-0ccc]
+  taskDefinition:
+    containers:
+      - name: migrate
+        image: 123.dkr.ecr.us-east-1.amazonaws.com/api:latest
+        command: ["python", "manage.py", "migrate"]
+```
+
+- Reconciles only the cluster + task definition (Synced = definition registered and
+  current). No service is created.
+- Launch on demand with **Run now** (`POST /api/apps/{name}/run`, optional `{count}`),
+  or automatically via `runPolicy.runOnSync: true`.
+- Runs are tagged `startedBy=androcd-task-<name>`, appear in the **Tasks** tab with exit
+  codes, and drive the app's health (last-run success/failure).
 
 ### `kind: ECSCluster`
 
@@ -753,6 +785,7 @@ webhook, the public docs and `/api/schema`). `/healthz` and `/readyz` are always
 | POST | `/api/apps/{name}/sync` | operator | Force reconcile |
 | POST | `/api/apps/{name}/rollback` | operator | `{revision}` → redeploy, pauses auto-sync |
 | POST | `/api/apps/{name}/prune` | operator | Delete Orphaned app's AWS service |
+| POST | `/api/apps/{name}/run` | operator | Run now — launch an `ECSTask` (`{count?}`) |
 | POST | `/api/refresh` | operator | Git pull + diff pass immediately |
 | GET | `/api/audit` | admin | Audit trail (`?limit=&user=&action=`) |
 | GET | `/api/schema` | — | JSON Schema of the manifest format (public) |

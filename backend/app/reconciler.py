@@ -1,10 +1,13 @@
 import logging
 import threading
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
+
+_EPOCH = datetime.min.replace(tzinfo=timezone.utc)   # sort fallback for task timestamps
 
 # Adaptive retry mode handles AWS throttling gracefully; keep timeouts finite
 # so a single hung call doesn't stall the reconcile loop.
@@ -753,6 +756,8 @@ def compute_diff(m: Manifest) -> dict:
         return _schedule_diff(m, region)
     if m.kind == "ECSCluster":
         return _cluster_diff(m, region)
+    if m.kind == "ECSTask":
+        return _task_diff(m, region)
     changes: list[str] = []
 
     cluster = _cached_cluster(m, region)
@@ -863,6 +868,18 @@ def compute_health(live: dict) -> tuple[str, str]:
             return "Healthy", (f"cluster ACTIVE ({c.get('activeServices', 0)} services, "
                                f"{c.get('runningTasks', 0)} running tasks)")
         return "Degraded", f"cluster status: {c.get('status')}"
+    if "task" in live:   # kind: ECSTask — desired state is "task definition ready"
+        if not live.get("taskDefinition"):
+            return "Unknown", "task definition not registered yet"
+        run = live.get("lastRun")
+        if run and run.get("lastStatus") == "STOPPED":
+            failed = [c for c in run.get("containers", []) if (c.get("exitCode") or 0) != 0]
+            if failed:
+                return "Degraded", f"last run failed (exit {failed[0].get('exitCode')})"
+            return "Healthy", f"task definition ready · last run succeeded ({run.get('id', '')[:12]})"
+        if run and run.get("lastStatus") in ("RUNNING", "PENDING", "PROVISIONING"):
+            return "Progressing", "task run in progress"
+        return "Healthy", "task definition ready"
     svc = live.get("service")
     if not svc:
         return "Unknown", "service does not exist"
@@ -931,6 +948,8 @@ def apply(m: Manifest) -> list[str]:
         return _schedule_apply(m, region)
     if m.kind == "ECSCluster":
         return _cluster_apply(m, region)
+    if m.kind == "ECSTask":
+        return _task_apply(m, region)
     ecs = _client("ecs", region, m)
     actions: list[str] = []
 
@@ -1033,6 +1052,17 @@ def apply(m: Manifest) -> list[str]:
     return actions
 
 
+def _net_config(m: Manifest) -> dict:
+    """awsvpc network configuration shared by services, hooks and one-off tasks."""
+    return {
+        "awsvpcConfiguration": {
+            "subnets": m.spec.network.subnets,
+            "securityGroups": m.spec.network.securityGroups,
+            "assignPublicIp": "ENABLED" if m.spec.service.assignPublicIp else "DISABLED",
+        }
+    }
+
+
 def _run_hook(m: Manifest, region: str, td_arn: str, hook, phase: str) -> list[str]:
     """Run a one-off task (command override) and wait for exit code 0."""
     import time as _t
@@ -1042,13 +1072,7 @@ def _run_hook(m: Manifest, region: str, td_arn: str, hook, phase: str) -> list[s
         cluster=m.spec.cluster,
         taskDefinition=td_arn,
         launchType=m.spec.service.launchType,
-        networkConfiguration={
-            "awsvpcConfiguration": {
-                "subnets": m.spec.network.subnets,
-                "securityGroups": m.spec.network.securityGroups,
-                "assignPublicIp": "ENABLED" if m.spec.service.assignPublicIp else "DISABLED",
-            }
-        },
+        networkConfiguration=_net_config(m),
         overrides={"containerOverrides": [{"name": container, "command": hook.command}]},
         startedBy=f"androcd-{phase}",
     )
@@ -1207,6 +1231,9 @@ def prune(m: Manifest) -> list[str]:
         return _delete_schedule(m, region)
     if m.kind == "ECSCluster":
         return _cluster_prune(_client("ecs", region, m), m.spec.cluster)
+    if m.kind == "ECSTask":
+        # a one-off task owns no long-lived AWS resource; task definitions are kept
+        return ["nothing to delete for ECSTask (task definitions are kept)"]
     ecs = _client("ecs", region, m)
     service = get_live_service(m, region)
     actions: list[str] = []
@@ -1237,6 +1264,8 @@ def prune_raw(name: str, kind: str, cluster: str, region: str,
         return _delete_schedule_raw(name, region, profile)
     if kind == "ECSCluster":
         return _cluster_prune(_clients[key], cluster)
+    if kind == "ECSTask":
+        return ["nothing to delete for ECSTask (task definitions are kept)"]
     ecs = _clients[key]
     try:
         resp = ecs.describe_services(cluster=cluster, services=[name])
@@ -1411,6 +1440,147 @@ def _cluster_prune(ecs, cluster: str) -> list[str]:
     except ClientError as e:
         raise RuntimeError(f"cluster delete failed: {e.response['Error']['Message']}")
     return [f"deleted cluster '{cluster}'"]
+
+
+# ---------- one-off tasks (kind: ECSTask) ----------
+#
+# An ECSTask reconciles only the cluster + task definition (no service). Its desired
+# state is "the task definition is registered and current"; actually running it is a
+# manual action ("Run now") or, with runPolicy.runOnSync, automatic on each task-def
+# change (migrations). Runs are tagged with startedBy so the UI can list them.
+
+def _task_started_by(m: Manifest) -> str:
+    return f"androcd-task-{m.name}"[:128]
+
+
+def _task_diff(m: Manifest, region: str) -> dict:
+    changes: list[str] = []
+    cluster = get_live_cluster(m, region)
+    if cluster is None:
+        changes.append(f"cluster '{m.spec.cluster}' will be created")
+
+    desired_td = _register_kwargs(m, region)
+    live_td = get_live_taskdef(m, region)
+    if live_td is None:
+        changes.append(f"task definition '{m.family}' will be registered")
+        if m.spec.runPolicy.runOnSync:
+            changes.append("task will run on sync (runOnSync)")
+    else:
+        td_changes = _taskdef_changes(live_td, desired_td)
+        changes.extend(td_changes)
+        if td_changes and m.spec.runPolicy.runOnSync:
+            changes.append("task will run on sync (runOnSync)")
+
+    return {"in_sync": not changes, "changes": changes,
+            "live": _task_live_summary(m, region, live_td)}
+
+
+def _task_live_summary(m: Manifest, region: str, live_td: Optional[dict]) -> dict:
+    out: dict[str, Any] = {"task": True, "clusterExists": get_live_cluster(m, region) is not None,
+                           "taskDefinition": None, "lastRun": None}
+    if live_td:
+        out["taskDefinition"] = {
+            "arn": live_td["taskDefinitionArn"],
+            "revision": live_td["revision"],
+            "images": [c["image"] for c in live_td.get("containerDefinitions", [])],
+        }
+    out["lastRun"] = _task_last_run(m, region)
+    return out
+
+
+def _task_last_run(m: Manifest, region: str) -> Optional[dict]:
+    """Most recent run of this task (running or stopped), by startedBy tag."""
+    ecs = _client("ecs", region, m)
+    started_by = _task_started_by(m)
+    arns: list[str] = []
+    for status in ("RUNNING", "STOPPED"):
+        try:
+            arns += ecs.list_tasks(cluster=m.spec.cluster, startedBy=started_by,
+                                   desiredStatus=status).get("taskArns", [])
+        except ClientError:
+            return None
+    if not arns:
+        return None
+    tasks = ecs.describe_tasks(cluster=m.spec.cluster, tasks=arns[:100]).get("tasks", [])
+    if not tasks:
+        return None
+    latest = max(tasks, key=lambda t: t.get("startedAt") or t.get("createdAt") or _EPOCH)
+    containers = [{"name": c.get("name"), "exitCode": c.get("exitCode"), "reason": c.get("reason")}
+                  for c in latest.get("containers", [])]
+    return {
+        "id": (latest.get("taskArn") or "").split("/")[-1],
+        "lastStatus": latest.get("lastStatus"),
+        "startedAt": latest.get("startedAt"),
+        "stoppedAt": latest.get("stoppedAt"),
+        "stoppedReason": latest.get("stoppedReason"),
+        "containers": containers,
+    }
+
+
+def _task_apply(m: Manifest, region: str) -> list[str]:
+    ecs = _client("ecs", region, m)
+    actions: list[str] = []
+    actions.extend(_ensure_cluster(m, region, ecs))
+    for c in m.spec.taskDefinition.containers:
+        if c.logGroup:
+            _ensure_log_group(c.logGroup, region, m)
+
+    desired_td = _register_kwargs(m, region)
+    live_td = get_live_taskdef(m, region)
+    td_changed = live_td is None or bool(_taskdef_changes(live_td, desired_td))
+    if td_changed:
+        resp = ecs.register_task_definition(**desired_td)
+        td_arn = resp["taskDefinition"]["taskDefinitionArn"]
+        actions.append(f"registered task definition {td_arn.split('/')[-1]}")
+        actions.extend(_cleanup_taskdefs(m, ecs, in_use=td_arn))
+    else:
+        td_arn = live_td["taskDefinitionArn"]
+
+    if td_changed and m.spec.runPolicy.runOnSync:
+        run = _run_task(m, region, td_arn)
+        actions.append(f"ran task ({run['started']} task(s) started) [runOnSync]")
+    return actions
+
+
+def _run_task(m: Manifest, region: str, td_arn: Optional[str] = None,
+              count: Optional[int] = None) -> dict:
+    """Launch the task definition N times (fire-and-forget). Returns started task ids."""
+    ecs = _client("ecs", region, m)
+    if td_arn is None:
+        live_td = get_live_taskdef(m, region)
+        if live_td is None:
+            # register on first run so "Run now" works before any sync
+            td_arn = ecs.register_task_definition(**_register_kwargs(m, region))["taskDefinition"]["taskDefinitionArn"]
+        else:
+            td_arn = live_td["taskDefinitionArn"]
+    kwargs: dict[str, Any] = dict(
+        cluster=m.spec.cluster,
+        taskDefinition=td_arn,
+        count=count or m.spec.runPolicy.count,
+        networkConfiguration=_net_config(m),
+        startedBy=_task_started_by(m),
+    )
+    strategy = _capacity_strategy(m)
+    if strategy:
+        kwargs["capacityProviderStrategy"] = strategy
+    else:
+        kwargs["launchType"] = m.spec.service.launchType
+    if m.metadata.labels:
+        kwargs["tags"] = _aws_tags(m)
+    resp = ecs.run_task(**kwargs)
+    failures = resp.get("failures", [])
+    if failures and not resp.get("tasks"):
+        raise RuntimeError(f"run task failed: {failures[0].get('reason')}")
+    task_ids = [(t.get("taskArn") or "").split("/")[-1] for t in resp.get("tasks", [])]
+    log.info("ran task %s: started %d task(s)", m.name, len(task_ids))
+    return {"started": len(task_ids), "tasks": task_ids}
+
+
+def run_task_now(m: Manifest, count: Optional[int] = None) -> dict:
+    """Public 'Run now' entrypoint for kind ECSTask."""
+    if m.kind != "ECSTask":
+        raise ValueError("run is only supported for kind ECSTask")
+    return _run_task(m, _region(m), count=count)
 
 
 # ---------- scheduled tasks (EventBridge Scheduler) ----------
@@ -1641,10 +1811,13 @@ def get_resources(m: Manifest) -> dict:
         }
 
     out["stoppedTasks"] = []
-    if cluster and service:
+    # ECSTask has no service — its runs are found by the startedBy tag instead.
+    is_task = m.kind == "ECSTask"
+    list_selector = {"startedBy": _task_started_by(m)} if is_task else {"serviceName": m.name}
+    if cluster and (service or is_task):
         for desired_status, bucket in (("RUNNING", "tasks"), ("STOPPED", "stoppedTasks")):
-            arns = ecs.list_tasks(cluster=m.spec.cluster, serviceName=m.name,
-                                  desiredStatus=desired_status).get("taskArns", [])
+            arns = ecs.list_tasks(cluster=m.spec.cluster, desiredStatus=desired_status,
+                                  **list_selector).get("taskArns", [])
             if not arns:
                 continue
             for t in ecs.describe_tasks(cluster=m.spec.cluster, tasks=arns[:100]).get("tasks", []):
@@ -1698,6 +1871,13 @@ def get_diff_document(m: Manifest) -> dict:
     desired_td = _norm_taskdef(_register_kwargs(m, region))
     live_td_raw = get_live_taskdef(m, region)
     live_td = _norm_taskdef(live_td_raw) if live_td_raw else None
+
+    # ECSTask / ECSScheduledTask have no service — diff the task definition only.
+    if m.kind in ("ECSTask", "ECSScheduledTask"):
+        return {
+            "desired": {"taskDefinition": desired_td, "service": None},
+            "live": {"taskDefinition": live_td, "service": None},
+        }
 
     service = get_live_service(m, region) if m.kind == "ECSService" else None
     # In managed LB mode resolve the created target group's ARN so the desired vs

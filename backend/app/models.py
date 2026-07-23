@@ -176,6 +176,21 @@ class HooksSpec(BaseModel):
     postSync: Optional[HookSpec] = None  # one-off task after service update
 
 
+class RunPolicy(BaseModel):
+    """kind: ECSTask — how the one-off task is run.
+    runOnSync auto-runs it once whenever the task definition changes (migrations);
+    otherwise it only runs on demand via the 'Run now' button / API."""
+    runOnSync: bool = False
+    count: int = 1                       # tasks to launch per run (1–10)
+
+    @field_validator("count")
+    @classmethod
+    def _count_range(cls, v: int) -> int:
+        if not 1 <= v <= 10:
+            raise ValueError("runPolicy.count must be between 1 and 10")
+        return v
+
+
 class ScheduleSpec(BaseModel):
     expression: str                      # cron(...) or rate(...) — EventBridge Scheduler syntax
     roleArn: str                         # role EventBridge assumes to run the task
@@ -258,6 +273,7 @@ class Spec(BaseModel):
     syncPolicy: SyncPolicy = Field(default_factory=SyncPolicy)
     hooks: HooksSpec = Field(default_factory=HooksSpec)
     schedule: Optional[ScheduleSpec] = None   # required for kind ECSScheduledTask
+    runPolicy: RunPolicy = Field(default_factory=RunPolicy)   # kind ECSTask
 
     # --- kind: ECSCluster only ---
     containerInsights: Optional[str] = None   # disabled | enabled | enhanced
@@ -276,16 +292,17 @@ class Spec(BaseModel):
 class Manifest(BaseModel):
     apiVersion: str
     # enum surfaces in the published JSON Schema (/api/schema) for manifest-repo CI
-    kind: str = Field(json_schema_extra={"enum": ["ECSService", "ECSScheduledTask", "ECSCluster"]})
+    kind: str = Field(json_schema_extra={
+        "enum": ["ECSService", "ECSScheduledTask", "ECSCluster", "ECSTask"]})
     metadata: Metadata
     spec: Spec
 
     @field_validator("kind")
     @classmethod
     def _kind(cls, v: str) -> str:
-        if v not in ("ECSService", "ECSScheduledTask", "ECSCluster"):
+        if v not in ("ECSService", "ECSScheduledTask", "ECSCluster", "ECSTask"):
             raise ValueError(
-                f"unsupported kind '{v}', expected ECSService, ECSScheduledTask or ECSCluster")
+                f"unsupported kind '{v}', expected ECSService, ECSScheduledTask, ECSCluster or ECSTask")
         return v
 
     @model_validator(mode="after")

@@ -1,0 +1,30 @@
+# One-off task / job (kind: ECSTask) — e.g. a database migration.
+# Reconciles only the task definition (no long-running service). Launch it with the
+# "Run now" button in the UI / POST /api/apps/{name}/run, or set runOnSync so it runs
+# automatically whenever the task definition changes.
+apiVersion: andro-cd/v1
+kind: ECSTask
+metadata:
+  name: db-migrate
+  labels: {team: backend}
+spec:
+  region: eu-central-1
+  cluster: batch
+  service:
+    launchType: FARGATE          # launch settings for the run
+    assignPublicIp: false
+  runPolicy:
+    runOnSync: true              # run once each time the task definition changes
+    count: 1                     # number of tasks per run (1–10)
+  network:
+    subnets: [subnet-aaa, subnet-bbb]
+    securityGroups: [sg-0ccc333]
+  taskDefinition:
+    cpu: "512"
+    memory: "1024"
+    executionRoleArn: arn:aws:iam::123456789012:role/ecsTaskExecutionRole
+    containers:
+      - name: migrate
+        image: 123456789012.dkr.ecr.eu-central-1.amazonaws.com/api:latest
+        command: ["python", "manage.py", "migrate", "--noinput"]
+        logGroup: /ecs/db-migrate

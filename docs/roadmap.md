@@ -9,10 +9,11 @@ The full, continuously updated list lives in
 - GitOps core: multi-repo, webhooks, rollback, prune, self-heal, sync waves,
   pre/post-sync hooks, app-of-apps (`ECSServiceSet`), values-file templating,
   sync windows
-- AWS coverage: `ECSCluster` kind, scheduled tasks, autoscaling, load balancers
-  (attach to an existing target group **or** create the target group + listener rule
-  from the manifest), capacity providers (Fargate Spot), container health checks, ECR
-  digest pinning, labels → AWS tags, task-definition cleanup, multi-account profiles
+- AWS coverage: `ECSCluster` and `ECSTask` (one-off jobs / run-now) kinds, scheduled
+  tasks, autoscaling, load balancers (attach to an existing target group **or** create the
+  target group + listener rule from the manifest), capacity providers (Fargate Spot),
+  container health checks, ECR digest pinning, labels → AWS tags, task-definition cleanup,
+  multi-account profiles
 - Security: GitHub OAuth **and generic OIDC** (Google/Okta/Keycloak/Dex/Auth0/Azure AD)
   + RBAC, API tokens, audit log, CSP/CSRF/rate limiting, encrypted credentials, non-root
   container, JSON Schema publishing
@@ -24,12 +25,12 @@ The full, continuously updated list lives in
 
 ## Next up
 
-1. **`ECSTask` kind** — one-off tasks/jobs with "run now" in the UI.
-2. **EFS volumes & FireLens sidecars** — rounding out task-definition coverage.
-3. **ALB request-count autoscaling** — target-tracking on `ALBRequestCountPerTarget`
+1. **EFS volumes & FireLens sidecars** — rounding out task-definition coverage.
+2. **ALB request-count autoscaling** — target-tracking on `ALBRequestCountPerTarget`
    (now that managed target groups exist).
+3. **Service Connect / Cloud Map** — service discovery config in the manifest.
 4. **Session refresh** — silently renew expiring sessions instead of forcing re-login.
-5. **Service Connect / Cloud Map** — service discovery config in the manifest.
+5. **Grafana dashboard JSON** — a ready-made dashboard for the Prometheus metrics.
 
 ## Contributing
 

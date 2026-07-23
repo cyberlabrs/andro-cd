@@ -10,6 +10,9 @@
   manifest is removed from Git, or manual on any Orphaned app. For `ECSCluster`, prune
   refuses while the cluster still has workloads.
 - **Refresh** — git pull + diff pass immediately, without waiting for the poll.
+- **Run now** — for an `ECSTask`, launch its task definition once (optional `count`); the
+  run appears in the Tasks tab. `runPolicy.runOnSync` runs it automatically on task-def
+  changes.
 
 ## Sync waves
 

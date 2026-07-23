@@ -26,12 +26,12 @@ image, a React dashboard, and your manifests in Git as the single source of trut
     Sync & health per app, side-by-side diff, live CloudWatch logs (SSE), task
     forensics, deployment timeline, one-click sync/rollback/prune, dark mode.
 
--   :material-cube-outline:{ .lg .middle } **Four kinds**
+-   :material-cube-outline:{ .lg .middle } **Five kinds**
 
     ---
 
-    `ECSService`, `ECSScheduledTask` (EventBridge cron), `ECSServiceSet`
-    (app-of-apps generators) and `ECSCluster` — the cluster itself managed from Git.
+    `ECSService`, `ECSScheduledTask` (cron), `ECSTask` (one-off jobs), `ECSServiceSet`
+    (app-of-apps) and `ECSCluster` — the cluster itself managed from Git.
 
 -   :material-shield-check:{ .lg .middle } **Production-grade security**
 

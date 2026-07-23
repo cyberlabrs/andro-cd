@@ -15,8 +15,8 @@ task definitions, scheduled tasks and the clusters themselves, all declared in G
 
 - **GitOps reconciliation** — poll or webhook-triggered; diff → apply with sync waves,
   pre/post-sync hooks (migrations), self-heal and safe pruning
-- **Four kinds** — `ECSService`, `ECSScheduledTask` (EventBridge cron), `ECSServiceSet`
-  (app-of-apps generators), `ECSCluster` (insights, capacity providers, Service Connect)
+- **Five kinds** — `ECSService`, `ECSScheduledTask` (EventBridge cron), `ECSTask` (one-off
+  jobs / run-now), `ECSServiceSet` (app-of-apps generators), `ECSCluster` (the cluster itself)
 - **Argo-style dashboard** — sync/health per app, side-by-side diff, live CloudWatch
   logs (SSE), stopped-task forensics, deployment timeline, sync/rollback/prune, dark mode
 - **Production security** — GitHub OAuth + RBAC, API tokens for CI, audit log,

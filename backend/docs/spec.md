@@ -81,6 +81,11 @@ spec:
   `${var}` substitution → expands to N `ECSService` apps.
 - **`ECSScheduledTask`**: `spec.schedule.{expression, roleArn, enabled}` — cron/rate via
   EventBridge Scheduler running the task definition.
+- **`ECSTask`**: one-off task/job (migrations, batch). Reconciles only the cluster + task
+  definition (no service); run it with the **Run now** button / `POST /api/apps/{name}/run`,
+  or set `spec.runPolicy.runOnSync: true` to run once on every task-def change.
+  `spec.runPolicy.count` (1–10) sets how many tasks per run. Runs are tagged with
+  `startedBy` and appear in the Tasks tab.
 - **`ECSCluster`**: manage the cluster itself as a GitOps app — `spec.containerInsights`
   (disabled/enabled/enhanced), `spec.capacityProviders` (attached to the cluster),
   `spec.defaultCapacityProviderStrategy` (default for services without their own),
@@ -152,6 +157,7 @@ Apps removed from Git are marked `Orphaned` (no automatic deletion in v1 — saf
 | GET    | `/api/apps/{name}/revisions` | recent task definition revisions      |
 | POST   | `/api/apps/{name}/rollback` | `{revision}` — redeploy an old revision, pauses auto-sync |
 | POST   | `/api/apps/{name}/prune` | delete the ECS service of an Orphaned app |
+| POST   | `/api/apps/{name}/run` | run now — launch an `ECSTask`'s task definition once (`{count?}`) |
 | POST   | `/api/refresh`          | git pull + recompute all diffs now        |
 | GET    | `/api/audit`            | audit trail: who synced/rolled back/pruned what (`?limit=&user=&action=`, admin) |
 | GET    | `/api/schema`           | JSON Schema of the manifest format (public, for manifest-repo CI) |

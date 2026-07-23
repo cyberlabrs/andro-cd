@@ -20,6 +20,7 @@ the HMAC-verified webhook, the docs and `/api/schema`.
 | POST | `/api/apps/{name}/sync` | operator | Force reconcile |
 | POST | `/api/apps/{name}/rollback` | operator | `{revision}` — redeploy, pause auto-sync |
 | POST | `/api/apps/{name}/prune` | operator | Delete an Orphaned app's resources |
+| POST | `/api/apps/{name}/run` | operator | Run now — launch an `ECSTask` (`{count?}`) |
 | POST | `/api/refresh` | operator | Git pull + diff pass now |
 | GET | `/api/audit` | admin | Audit trail (`?limit=&user=&action=`) |
 | GET | `/api/schema` | — | JSON Schema of the manifest format |
