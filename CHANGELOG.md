@@ -5,6 +5,13 @@ All notable changes are documented here. The format follows
 [Semantic Versioning](https://semver.org/). Entries are generated automatically by
 [release-please](https://github.com/googleapis/release-please).
 
+## [0.3.1](https://github.com/cyberlabrs/andro-cd/compare/v0.3.0...v0.3.1) (2026-07-23)
+
+
+### Bug Fixes
+
+* refresh repo on manual sync and widen log stream window ([a89ae2f](https://github.com/cyberlabrs/andro-cd/commit/a89ae2f6a8f29554f9c54fc9de3d834d3a487a20))
+
 ## [0.3.0](https://github.com/cyberlabrs/andro-cd/compare/v0.2.0...v0.3.0) (2026-07-23)
 
 
