@@ -5,6 +5,13 @@ All notable changes are documented here. The format follows
 [Semantic Versioning](https://semver.org/). Entries are generated automatically by
 [release-please](https://github.com/googleapis/release-please).
 
+## [0.6.0](https://github.com/cyberlabrs/andro-cd/compare/v0.5.0...v0.6.0) (2026-08-08)
+
+
+### Features
+
+* ECS native blue/green, canary and linear deployment strategies ([ac5dab9](https://github.com/cyberlabrs/andro-cd/commit/ac5dab98708538317b9f5ad7005df29a340640bc))
+
 ## [0.5.0](https://github.com/cyberlabrs/andro-cd/compare/v0.4.0...v0.5.0) (2026-08-08)
 
 
