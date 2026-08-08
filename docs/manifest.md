@@ -59,6 +59,7 @@ spec:
       maxCount: 10
       targetCpu: 60
       targetMemory: 70
+      targetRequestsPerTarget: 250      # ALBRequestCountPerTarget; requires loadBalancer
     loadBalancer:
       containerName: web                # defaults to the first container
       containerPort: 8080
@@ -80,12 +81,41 @@ spec:
       #     healthyThreshold: 3
       #     unhealthyThreshold: 3
       #     matcher: "200-399"
+      # Native blue/green / canary / linear extras (required by deploymentStrategy):
+      # alternateTargetGroupArn: arn:aws:elasticloadbalancing:...:targetgroup/green/...
+      # productionListenerRule:  arn:aws:elasticloadbalancing:...:listener-rule/prod/...
+      # testListenerRule:        arn:aws:elasticloadbalancing:...:listener-rule/test/...  # dark canary
+      # roleArn:                 arn:aws:iam::...:role/ELBBlueGreen
+    # Native ECS deployment strategy — see docs/operations.md for details.
+    # deploymentStrategy:
+    #   type: BLUE_GREEN                # ROLLING | BLUE_GREEN | CANARY | LINEAR
+    #   bakeTimeMinutes: 15
+    #   canaryPercent: 10               # CANARY only
+    #   linearStepPercent: 20           # LINEAR only
+    #   alarms:
+    #     alarmNames: [api-5xx]
+    #     rollback: true
+    #   lifecycleHooks:
+    #     - targetType: AWS_LAMBDA
+    #       hookTargetArn: arn:aws:lambda:...:function:validate
+    #       stages: [POST_TEST_TRAFFIC_SHIFT]
+    #       timeoutMinutes: 10
+    #       timeoutAction: ROLLBACK
     capacityProviders:                  # weighted strategy instead of launchType
       - provider: FARGATE_SPOT
         weight: 3
       - provider: FARGATE
         weight: 1
         base: 1                         # always ≥1 on on-demand
+    serviceConnect:                     # optional; omit to leave live config untouched
+      enabled: true
+      namespace: internal               # overrides cluster default (Cloud Map ns name or ARN)
+      services:
+        - portName: http                # matches a container's portMappings[].name
+          discoveryName: api            # defaults to portName
+          clientAliases:
+            - port: 8080
+              dnsName: api              # defaults to discoveryName
   network:
     subnets: [subnet-aaa, subnet-bbb]
     securityGroups: [sg-0ccc]
@@ -119,12 +149,40 @@ spec:
         command: ["gunicorn", "app.wsgi"]
         entryPoint: ["/entrypoint.sh"]
         logGroup: /ecs/web-app          # awslogs driver; group auto-created
+        # Free-form logConfiguration wins over `logGroup` — use it for FireLens:
+        # logConfiguration:
+        #   logDriver: awsfirelens
+        #   options: {Name: cloudwatch, region: us-east-1, log_group_name: /ecs/web-app}
         healthCheck:                    # docker HEALTHCHECK semantics
           command: ["CMD-SHELL", "curl -f http://localhost/health || exit 1"]
           interval: 30
           timeout: 5
           retries: 3
           startPeriod: 15
+        mountPoints:                    # bind a task volume into this container
+          - sourceVolume: data          # must match spec.taskDefinition.volumes[].name
+            containerPath: /var/data
+            readOnly: false
+        dependsOn:                      # wait for another container to reach a condition
+          - containerName: log-router
+            condition: START            # START | COMPLETE | SUCCESS | HEALTHY
+      # A FireLens log-router sidecar in the same task definition:
+      - name: log-router
+        image: amazon/aws-for-fluent-bit:latest
+        essential: false
+        firelensConfiguration:
+          type: fluentbit               # fluentbit | fluentd
+          options: {enable-ecs-log-metadata: "true"}
+    volumes:                            # task-level volumes; EFS today
+      - name: data
+        efs:
+          fileSystemId: fs-01234567
+          rootDirectory: /app
+          transitEncryption: true       # required with an access point
+          transitEncryptionPort: 2999   # optional
+          authorizationConfig:
+            accessPointId: fsap-abcdef
+            iam: true                   # use the task IAM role for the EFS mount
 ```
 
 !!! note "ECR digest pinning"

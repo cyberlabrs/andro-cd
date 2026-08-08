@@ -205,11 +205,112 @@ class LoadBalancerSpec(BaseModel):
     containerName: Optional[str] = None   # defaults to the first container
     containerPort: int
     create: Optional[ManagedLBSpec] = None  # managed mode: TG + rule created from Git
+    # --- native blue/green (deploymentController=ECS, strategy=BLUE_GREEN|CANARY|LINEAR) ---
+    # ECS routes production traffic to `targetGroupArn` and shifts traffic through the
+    # ALB's productionListenerRule; `alternateTargetGroupArn` receives the green fleet,
+    # optionally exposed via `testListenerRule` for dark canary validation.
+    alternateTargetGroupArn: Optional[str] = None
+    productionListenerRule: Optional[str] = None
+    testListenerRule: Optional[str] = None            # dark canary (bring your own listener rule)
+    roleArn: Optional[str] = None                     # ELB role Andro-CD passes to ECS
 
     @model_validator(mode="after")
     def _exactly_one_mode(self) -> "LoadBalancerSpec":
         if bool(self.targetGroupArn) == bool(self.create):
             raise ValueError("loadBalancer requires exactly one of targetGroupArn (reference) or create (managed)")
+        return self
+
+
+class LifecycleHookSpec(BaseModel):
+    """Deployment lifecycle hook fired at one or more stages during a native
+    blue/green / canary / linear rollout. Two target types:
+      - AWS_LAMBDA: invoke a Lambda that returns hookStatus SUCCEEDED|FAILED|IN_PROGRESS
+      - PAUSE:      pause the deployment until an operator resumes it
+    """
+    targetType: str = "AWS_LAMBDA"                    # AWS_LAMBDA | PAUSE
+    hookTargetArn: Optional[str] = None               # Lambda function ARN (AWS_LAMBDA only)
+    roleArn: Optional[str] = None                     # role ECS assumes to invoke the hook
+    stages: list[str] = Field(default_factory=list)   # lifecycleStages
+    hookDetails: dict[str, Any] = Field(default_factory=dict)
+    timeoutMinutes: Optional[int] = None
+    timeoutAction: str = "ROLLBACK"                   # ROLLBACK | CONTINUE
+
+    _VALID_STAGES = {
+        "RECONCILE_SERVICE", "PRE_SCALE_UP", "POST_SCALE_UP",
+        "TEST_TRAFFIC_SHIFT", "POST_TEST_TRAFFIC_SHIFT",
+        "PRE_PRODUCTION_TRAFFIC_SHIFT", "PRODUCTION_TRAFFIC_SHIFT",
+        "POST_PRODUCTION_TRAFFIC_SHIFT",
+    }
+
+    @field_validator("targetType")
+    @classmethod
+    def _target_type(cls, v: str) -> str:
+        if v not in ("AWS_LAMBDA", "PAUSE"):
+            raise ValueError("lifecycleHook.targetType must be AWS_LAMBDA or PAUSE")
+        return v
+
+    @field_validator("timeoutAction")
+    @classmethod
+    def _timeout_action(cls, v: str) -> str:
+        if v not in ("ROLLBACK", "CONTINUE"):
+            raise ValueError("lifecycleHook.timeoutAction must be ROLLBACK or CONTINUE")
+        return v
+
+    @model_validator(mode="after")
+    def _validate_hook(self) -> "LifecycleHookSpec":
+        if not self.stages:
+            raise ValueError("lifecycleHook.stages must contain at least one stage")
+        bad = [s for s in self.stages if s not in self._VALID_STAGES]
+        if bad:
+            raise ValueError(
+                f"invalid lifecycleHook.stages: {bad} — expected one of "
+                f"{sorted(self._VALID_STAGES)}")
+        if self.targetType == "AWS_LAMBDA" and not self.hookTargetArn:
+            raise ValueError("lifecycleHook.hookTargetArn is required when targetType=AWS_LAMBDA")
+        return self
+
+
+class AlarmRollbackSpec(BaseModel):
+    """CloudWatch alarms that trigger auto-rollback of a deployment when they fire."""
+    alarmNames: list[str] = Field(min_length=1)
+    rollback: bool = True                            # auto-rollback when any alarm fires
+    enable: bool = True                              # temporarily disable without deleting
+
+
+class DeploymentStrategySpec(BaseModel):
+    """Native ECS deployment strategy. `type=ROLLING` reproduces the existing behavior
+    (default), `BLUE_GREEN` / `CANARY` / `LINEAR` require deploymentController=ECS,
+    a second target group and — for BLUE_GREEN and CANARY — production listener rule
+    references on the loadBalancer.
+    """
+    type: str = "ROLLING"                            # ROLLING | BLUE_GREEN | CANARY | LINEAR
+    bakeTimeMinutes: Optional[int] = None
+    canaryPercent: Optional[float] = None            # CANARY: initial % shifted
+    canaryBakeTimeMinutes: Optional[int] = None
+    linearStepPercent: Optional[float] = None        # LINEAR: % per step
+    linearStepBakeTimeMinutes: Optional[int] = None
+    lifecycleHooks: list[LifecycleHookSpec] = Field(default_factory=list)
+    alarms: Optional[AlarmRollbackSpec] = None
+
+    @field_validator("type")
+    @classmethod
+    def _type(cls, v: str) -> str:
+        if v not in ("ROLLING", "BLUE_GREEN", "CANARY", "LINEAR"):
+            raise ValueError("deploymentStrategy.type must be one of ROLLING, BLUE_GREEN, CANARY, LINEAR")
+        return v
+
+    @model_validator(mode="after")
+    def _strategy_requirements(self) -> "DeploymentStrategySpec":
+        if self.type == "CANARY":
+            if self.canaryPercent is None:
+                raise ValueError("deploymentStrategy.canaryPercent is required for type=CANARY")
+            if not 0 < self.canaryPercent < 100:
+                raise ValueError("canaryPercent must be between 0 and 100 (exclusive)")
+        if self.type == "LINEAR":
+            if self.linearStepPercent is None:
+                raise ValueError("deploymentStrategy.linearStepPercent is required for type=LINEAR")
+            if not 0 < self.linearStepPercent <= 100:
+                raise ValueError("linearStepPercent must be between 0 and 100")
         return self
 
 
@@ -254,6 +355,7 @@ class ServiceSettings(BaseModel):
     loadBalancer: Optional[LoadBalancerSpec] = None
     capacityProviders: list[CapacityProviderSpec] = Field(default_factory=list)
     serviceConnect: Optional[ServiceConnectSpec] = None
+    deploymentStrategy: Optional[DeploymentStrategySpec] = None
 
 
 class HookSpec(BaseModel):
@@ -425,6 +527,17 @@ class Manifest(BaseModel):
         if a and a.targetRequestsPerTarget is not None and not (self.spec.service and self.spec.service.loadBalancer):
             raise ValueError(
                 "autoscaling.targetRequestsPerTarget requires spec.service.loadBalancer")
+        # Native blue/green / canary / linear all need traffic shifting between two TGs
+        # on an ALB, so a loadBalancer with alternateTargetGroupArn + productionListenerRule
+        # is mandatory. Reject at parse time so the error is obvious in the diff, not
+        # after an ECS API rejection.
+        ds = self.spec.service.deploymentStrategy if self.spec.service else None
+        if ds and ds.type in ("BLUE_GREEN", "CANARY", "LINEAR"):
+            lb = self.spec.service.loadBalancer if self.spec.service else None
+            if not lb or not lb.alternateTargetGroupArn or not lb.productionListenerRule:
+                raise ValueError(
+                    f"deploymentStrategy.type={ds.type} requires spec.service.loadBalancer with "
+                    "alternateTargetGroupArn and productionListenerRule")
         return self
 
     @property

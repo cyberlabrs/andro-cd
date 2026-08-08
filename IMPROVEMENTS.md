@@ -190,13 +190,23 @@ tags/cost allocation, task definition cleanup, JSON logging — on top of the se
 (audit log, API tokens, CSP/CSRF/rate limits, non-root container, JSON Schema, readiness
 endpoint). Next up:
 
-1. **ECS native blue/green + canary + linear** — AWS added these in Jul 2025 / May 2026
-   (deploymentController=ECS, strategy BLUE_GREEN|CANARY|LINEAR, bakeTime, 7 lifecycle
-   hooks, dark canary via test listener). Biggest 2026-era gap versus Argo Rollouts /
-   the native ECS controller.
-2. **Grafana dashboard JSON** — ship a ready-made dashboard for the Prometheus metrics.
-3. **Backoff & retry** — exponential backoff per app on repeated sync failures instead of
+Just landed: **ECS native blue/green + canary + linear** — full pass-through of the
+2025/2026 AWS additions. `service.deploymentStrategy` supports type `BLUE_GREEN | CANARY
+| LINEAR` (in addition to `ROLLING`), `bakeTimeMinutes`, `canaryPercent`+bake time,
+`linearStepPercent`+bake time, CloudWatch `alarms` for auto-rollback, and up to 8
+`lifecycleHooks` (AWS_LAMBDA or PAUSE) across all 8 lifecycle stages including
+`POST_TEST_TRAFFIC_SHIFT`. The loadBalancer block accepts `alternateTargetGroupArn`,
+`productionListenerRule`, `testListenerRule` (dark canary) and `roleArn` — required for
+any non-ROLLING strategy. Reconciler now emits `deploymentController=ECS` when a
+strategy is set, threads `advancedConfiguration` through the loadBalancer entry,
+diff-detects drift on strategy/bakeTime/canaryPercent/linearStepPercent/alarms/hooks.
+
+1. **Grafana dashboard JSON** — ship a ready-made dashboard for the Prometheus metrics.
+2. **Backoff & retry** — exponential backoff per app on repeated sync failures instead of
    retrying every loop; circuit-break an app after N failures with manual reset.
-4. **AWS rate limit handling** — botocore adaptive retry mode, jitter between apps.
-5. **CLI expansion** — `androcd diff`, `androcd sync <app>`, `androcd logs <app>`
+3. **AWS rate limit handling** — botocore adaptive retry mode, jitter between apps.
+4. **CLI expansion** — `androcd diff`, `androcd sync <app>`, `androcd logs <app>`
    hitting the API from CI.
+5. **UI for deployment strategy state** — surface the active strategy, current bake
+   remaining, and lifecycle-hook history on the Overview tab (data is in the ECS
+   service response already).

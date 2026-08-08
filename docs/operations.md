@@ -64,12 +64,22 @@ SQLite / no-DB deployments are single-instance and always leader.
 ```yaml
 spec:
   service:
-    autoscaling: {minCount: 2, maxCount: 20, targetCpu: 60, targetMemory: 75}
+    autoscaling:
+      minCount: 2
+      maxCount: 20
+      targetCpu: 60
+      targetMemory: 75
+      targetRequestsPerTarget: 250       # ALB requests per target; requires loadBalancer
 ```
 
 Target-tracking Application Auto Scaling; once configured, the autoscaler owns
-`desiredCount` and the reconciler stops fighting it. Removing the block deregisters the
-scalable target. Policies are named `androcd-<app>-cpu` / `-memory`.
+`desiredCount` and the reconciler stops fighting it. Removing a target deregisters the
+matching policy. Policies are named `androcd-<app>-cpu` / `-memory` / `-requests`.
+
+`targetRequestsPerTarget` targets AWS's `ALBRequestCountPerTarget` metric — the
+ResourceLabel is resolved from either the referenced or managed target group. If the
+target group isn't yet attached to an ALB at reconcile time, the requests policy is
+skipped and re-attempted on the next tick.
 
 ## Load balancing
 
@@ -98,6 +108,61 @@ service:
   Andro-CD created — the ALB and listener are never touched).
 - The ALB and its listener remain your infrastructure — one ALB serves many
   Andro-CD apps, each with its own rule.
+
+## Deployment strategies (native blue/green, canary, linear)
+
+Andro-CD passes through the deployment strategy AWS added natively to ECS
+(`deploymentController=ECS`) — no CodeDeploy setup, no external Lambdas of your own.
+The default is a plain rolling update; the other three shift traffic between **two
+target groups** on the same ALB:
+
+```yaml
+spec:
+  service:
+    loadBalancer:
+      containerPort: 80
+      targetGroupArn: arn:aws:elasticloadbalancing:...:targetgroup/blue/...
+      alternateTargetGroupArn: arn:aws:elasticloadbalancing:...:targetgroup/green/...
+      productionListenerRule: arn:aws:elasticloadbalancing:...:listener-rule/prod/...
+      testListenerRule: arn:aws:elasticloadbalancing:...:listener-rule/test/...   # optional dark canary
+      roleArn: arn:aws:iam::...:role/ELBBlueGreen
+    deploymentStrategy:
+      type: BLUE_GREEN                   # ROLLING | BLUE_GREEN | CANARY | LINEAR
+      bakeTimeMinutes: 15                # dwell on the new fleet before finalizing
+      canaryPercent: 10                  # CANARY only — initial slice, 0<pct<100
+      canaryBakeTimeMinutes: 5           # CANARY only
+      linearStepPercent: 20              # LINEAR only — % shifted per step
+      linearStepBakeTimeMinutes: 3       # LINEAR only
+      alarms:                            # CloudWatch alarm-driven rollback
+        alarmNames: [api-5xx, api-latency]
+        rollback: true
+        enable: true
+      lifecycleHooks:                    # invoked at 1..N stages during the rollout
+        - targetType: AWS_LAMBDA         # AWS_LAMBDA | PAUSE
+          hookTargetArn: arn:aws:lambda:us-east-1:...:function:validate
+          roleArn: arn:aws:iam::...:role/ecs-hook-invoker
+          stages: [POST_TEST_TRAFFIC_SHIFT, POST_PRODUCTION_TRAFFIC_SHIFT]
+          timeoutMinutes: 10
+          timeoutAction: ROLLBACK        # ROLLBACK | CONTINUE
+```
+
+- `BLUE_GREEN` / `CANARY` / `LINEAR` all require `alternateTargetGroupArn` **and**
+  `productionListenerRule` on the loadBalancer — Andro-CD rejects the manifest at parse
+  time if either is missing, so the error surfaces in the diff rather than after an AWS
+  API rejection.
+- `testListenerRule` enables **dark canary**: the green fleet is reachable via a
+  separate listener rule (typically on a distinct host or path) that only your synthetic
+  checks and lifecycle-hook Lambdas hit. Production traffic still flows to blue until
+  the production listener rule flips.
+- The `alarms` block wires CloudWatch alarms to auto-rollback. When any listed alarm is
+  in ALARM state during the rollout, ECS reverts to the previous task set.
+- Lifecycle stages (any subset per hook): `RECONCILE_SERVICE`, `PRE_SCALE_UP`,
+  `POST_SCALE_UP`, `TEST_TRAFFIC_SHIFT`, `POST_TEST_TRAFFIC_SHIFT`,
+  `PRE_PRODUCTION_TRAFFIC_SHIFT`, `PRODUCTION_TRAFFIC_SHIFT`,
+  `POST_PRODUCTION_TRAFFIC_SHIFT`. Return `{"hookStatus": "SUCCEEDED"}` to advance,
+  `"FAILED"` to trigger rollback, `"IN_PROGRESS"` to have ECS re-poll.
+- `PAUSE` hooks stop the deployment at a stage until an operator manually resumes it
+  from the ECS console.
 
 ## Capacity providers (Fargate Spot)
 

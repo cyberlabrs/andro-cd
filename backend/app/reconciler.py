@@ -245,35 +245,112 @@ def _deployment_configuration(m: Manifest) -> dict:
         dc["minimumHealthyPercent"] = svc.minimumHealthyPercent
     if svc.maximumPercent is not None:
         dc["maximumPercent"] = svc.maximumPercent
+    ds = svc.deploymentStrategy
+    if ds:
+        dc["strategy"] = ds.type
+        if ds.bakeTimeMinutes is not None:
+            dc["bakeTimeInMinutes"] = ds.bakeTimeMinutes
+        if ds.type == "CANARY":
+            dc["canaryConfiguration"] = {"canaryPercent": float(ds.canaryPercent)}
+            if ds.canaryBakeTimeMinutes is not None:
+                dc["canaryConfiguration"]["canaryBakeTimeInMinutes"] = ds.canaryBakeTimeMinutes
+        if ds.type == "LINEAR":
+            dc["linearConfiguration"] = {"stepPercent": float(ds.linearStepPercent)}
+            if ds.linearStepBakeTimeMinutes is not None:
+                dc["linearConfiguration"]["stepBakeTimeInMinutes"] = ds.linearStepBakeTimeMinutes
+        if ds.lifecycleHooks:
+            dc["lifecycleHooks"] = [_lifecycle_hook(h) for h in ds.lifecycleHooks]
+        if ds.alarms:
+            dc["alarms"] = {
+                "alarmNames": list(ds.alarms.alarmNames),
+                "rollback": ds.alarms.rollback,
+                "enable": ds.alarms.enable,
+            }
     return dc
+
+
+def _lifecycle_hook(h) -> dict:
+    hook: dict[str, Any] = {"targetType": h.targetType, "lifecycleStages": list(h.stages)}
+    if h.hookTargetArn:
+        hook["hookTargetArn"] = h.hookTargetArn
+    if h.roleArn:
+        hook["roleArn"] = h.roleArn
+    if h.hookDetails:
+        hook["hookDetails"] = dict(h.hookDetails)
+    if h.timeoutMinutes is not None:
+        hook["timeoutConfiguration"] = {
+            "timeoutInMinutes": h.timeoutMinutes,
+            "action": h.timeoutAction,
+        }
+    return hook
+
+
+def _deployment_controller(m: Manifest) -> Optional[dict]:
+    """Native blue/green/canary/linear all require deploymentController.type=ECS.
+    Return None when the strategy is ROLLING (the default) so we don't churn
+    services created without an explicit controller."""
+    ds = m.spec.service.deploymentStrategy
+    if ds and ds.type != "ROLLING":
+        return {"type": "ECS"}
+    return None
 
 
 def _load_balancers(m: Manifest, tg_arn: Optional[str] = None) -> list[dict]:
     """Service loadBalancers attachment. In managed mode the target group is created
-    by Andro-CD, so its ARN is resolved at runtime and passed in as `tg_arn`."""
+    by Andro-CD, so its ARN is resolved at runtime and passed in as `tg_arn`.
+
+    When a native blue/green strategy is configured, the loadBalancer entry carries
+    an `advancedConfiguration` block with the alternate TG and listener rule ARNs
+    ECS needs to shift production and (optionally) dark-canary traffic."""
     lb = m.spec.service.loadBalancer
     if not lb:
         return []
     arn = lb.targetGroupArn or tg_arn
     if not arn:
         return []
-    return [{
+    entry: dict[str, Any] = {
         "targetGroupArn": arn,
         "containerName": lb.containerName or m.spec.taskDefinition.containers[0].name,
         "containerPort": lb.containerPort,
-    }]
+    }
+    if lb.alternateTargetGroupArn:
+        adv: dict[str, Any] = {"alternateTargetGroupArn": lb.alternateTargetGroupArn}
+        if lb.productionListenerRule:
+            adv["productionListenerRule"] = lb.productionListenerRule
+        if lb.testListenerRule:
+            adv["testListenerRule"] = lb.testListenerRule
+        if lb.roleArn:
+            adv["roleArn"] = lb.roleArn
+        entry["advancedConfiguration"] = adv
+    return [entry]
+
+
+def _adv_key(adv: Optional[dict]) -> tuple:
+    """Normalize advancedConfiguration so live-vs-desired comparison is order/None-stable."""
+    if not adv:
+        return ()
+    return (
+        adv.get("alternateTargetGroupArn") or None,
+        adv.get("productionListenerRule") or None,
+        adv.get("testListenerRule") or None,
+        adv.get("roleArn") or None,
+    )
 
 
 def _lb_key(lb: dict) -> tuple:
-    """Order-independent identity of a load balancer attachment."""
-    return (lb.get("targetGroupArn"), lb.get("containerName"), lb.get("containerPort"))
+    """Order-independent identity of a load balancer attachment.
+    Now includes advancedConfiguration so blue/green wiring (alt TG, listener rules)
+    drift is caught in diff."""
+    return (lb.get("targetGroupArn"), lb.get("containerName"), lb.get("containerPort"),
+            _adv_key(lb.get("advancedConfiguration")))
 
 
 def _lb_changes(m: Manifest, service: dict, tg_arn: Optional[str] = None) -> list[str]:
     desired = _load_balancers(m, tg_arn)
     live = [{"targetGroupArn": l.get("targetGroupArn"),
              "containerName": l.get("containerName"),
-             "containerPort": l.get("containerPort")}
+             "containerPort": l.get("containerPort"),
+             "advancedConfiguration": l.get("advancedConfiguration")}
             for l in service.get("loadBalancers", [])]
     # Compare by identity tuples so order and extra AWS fields don't cause churn (bug #11).
     if sorted(map(_lb_key, desired)) != sorted(map(_lb_key, live)):
@@ -663,7 +740,50 @@ def _deploy_config_changes(m: Manifest, service: dict) -> list[str]:
     for key in ("minimumHealthyPercent", "maximumPercent"):
         if key in desired and live.get(key) != desired[key]:
             changes.append(f"{key}: {live.get(key)} -> {desired[key]}")
+    # Native strategy diff: `strategy` defaults to ROLLING when omitted by AWS. Only surface
+    # a change when the manifest opts in (avoid noise on services created without a strategy).
+    ds = m.spec.service.deploymentStrategy
+    if ds:
+        live_strategy = live.get("strategy") or "ROLLING"
+        if live_strategy != ds.type:
+            changes.append(f"deploymentStrategy: {live_strategy} -> {ds.type}")
+        if ds.bakeTimeMinutes is not None and live.get("bakeTimeInMinutes") != ds.bakeTimeMinutes:
+            changes.append(f"bakeTimeInMinutes: {live.get('bakeTimeInMinutes')} -> {ds.bakeTimeMinutes}")
+        if ds.type == "CANARY":
+            live_cc = live.get("canaryConfiguration") or {}
+            if float(live_cc.get("canaryPercent") or 0) != float(ds.canaryPercent):
+                changes.append(f"canaryPercent: {live_cc.get('canaryPercent')} -> {ds.canaryPercent}")
+        if ds.type == "LINEAR":
+            live_lc = live.get("linearConfiguration") or {}
+            if float(live_lc.get("stepPercent") or 0) != float(ds.linearStepPercent):
+                changes.append(f"linearStepPercent: {live_lc.get('stepPercent')} -> {ds.linearStepPercent}")
+        # Alarm rollback: surface a "will be set/updated/removed" change on any drift.
+        live_alarms = live.get("alarms") or {}
+        desired_alarms = desired.get("alarms")
+        if desired_alarms:
+            if (sorted(live_alarms.get("alarmNames") or []) != sorted(desired_alarms["alarmNames"])
+                or bool(live_alarms.get("rollback")) != desired_alarms["rollback"]
+                or bool(live_alarms.get("enable")) != desired_alarms["enable"]):
+                changes.append(
+                    f"alarms: {live_alarms or None} -> {desired_alarms}")
+        elif live_alarms:
+            changes.append(f"alarms will be removed: {live_alarms}")
+        # Lifecycle hooks: identity is (targetType, hookTargetArn, sorted(stages)); we don't
+        # try to preserve execution order because ECS itself doesn't.
+        live_hooks = _hook_identity_set(live.get("lifecycleHooks") or [])
+        desired_hooks = _hook_identity_set(desired.get("lifecycleHooks") or [])
+        if live_hooks != desired_hooks:
+            changes.append(
+                f"lifecycleHooks: {len(live_hooks)} -> {len(desired_hooks)} hook(s)")
     return changes
+
+
+def _hook_identity_set(hooks: list[dict]) -> set[tuple]:
+    return {
+        (h.get("targetType"), h.get("hookTargetArn") or None,
+         tuple(sorted(h.get("lifecycleStages") or [])))
+        for h in hooks
+    }
 
 
 # ---------- normalization & comparison ----------
@@ -1210,6 +1330,9 @@ def apply(m: Manifest) -> list[str]:
         sc_cfg = _service_connect_config(m)
         if sc_cfg is not None:
             create_kwargs["serviceConnectConfiguration"] = sc_cfg
+        controller = _deployment_controller(m)
+        if controller:
+            create_kwargs["deploymentController"] = controller
         ecs.create_service(**create_kwargs)
         actions.append(f"created service '{m.name}'")
     else:
@@ -2116,11 +2239,15 @@ def get_diff_document(m: Manifest) -> dict:
             "assignPublicIp": net.get("assignPublicIp"),
             "deploymentConfiguration": {
                 k: v for k, v in (service.get("deploymentConfiguration") or {}).items()
-                if k in ("deploymentCircuitBreaker", "minimumHealthyPercent", "maximumPercent")
+                if k in ("deploymentCircuitBreaker", "minimumHealthyPercent", "maximumPercent",
+                         "strategy", "bakeTimeInMinutes", "canaryConfiguration",
+                         "linearConfiguration", "lifecycleHooks", "alarms")
             },
             "loadBalancers": [
                 {"targetGroupArn": l.get("targetGroupArn"), "containerName": l.get("containerName"),
-                 "containerPort": l.get("containerPort")}
+                 "containerPort": l.get("containerPort"),
+                 **({"advancedConfiguration": l["advancedConfiguration"]}
+                    if l.get("advancedConfiguration") else {})}
                 for l in service.get("loadBalancers", [])
             ],
         }
