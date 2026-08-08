@@ -5,6 +5,13 @@ All notable changes are documented here. The format follows
 [Semantic Versioning](https://semver.org/). Entries are generated automatically by
 [release-please](https://github.com/googleapis/release-please).
 
+## [0.7.0](https://github.com/cyberlabrs/andro-cd/compare/v0.6.0...v0.7.0) (2026-08-08)
+
+
+### Features
+
+* **ui:** deployment strategy panel with live bake-time countdown ([8468dba](https://github.com/cyberlabrs/andro-cd/commit/8468dba804ce7f886551885b39e8f5b8049b336e))
+
 ## [0.6.0](https://github.com/cyberlabrs/andro-cd/compare/v0.5.0...v0.6.0) (2026-08-08)
 
 
