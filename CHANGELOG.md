@@ -5,6 +5,13 @@ All notable changes are documented here. The format follows
 [Semantic Versioning](https://semver.org/). Entries are generated automatically by
 [release-please](https://github.com/googleapis/release-please).
 
+## [0.5.0](https://github.com/cyberlabrs/andro-cd/compare/v0.4.0...v0.5.0) (2026-08-08)
+
+
+### Features
+
+* **ui:** richer side-by-side diff — YAML default, syntax highlight, line numbers, fold ([e481762](https://github.com/cyberlabrs/andro-cd/commit/e481762fe1e88df90f31f064acd6221ac26bde57))
+
 ## [0.4.0](https://github.com/cyberlabrs/andro-cd/compare/v0.3.1...v0.4.0) (2026-08-08)
 
 
