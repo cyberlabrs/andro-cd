@@ -2121,8 +2121,28 @@ def get_resources(m: Manifest) -> dict:
             "circuitBreaker": dc.get("deploymentCircuitBreaker"),
             "minimumHealthyPercent": dc.get("minimumHealthyPercent"),
             "maximumPercent": dc.get("maximumPercent"),
+            # Native deployment strategy state (blue/green, canary, linear). Exposed even
+            # for ROLLING so the UI can show "Strategy: Rolling" instead of guessing.
+            "deploymentStrategy": {
+                "type": dc.get("strategy") or "ROLLING",
+                "bakeTimeMinutes": dc.get("bakeTimeInMinutes"),
+                "canaryPercent": (dc.get("canaryConfiguration") or {}).get("canaryPercent"),
+                "canaryBakeTimeMinutes": (dc.get("canaryConfiguration") or {}).get("canaryBakeTimeInMinutes"),
+                "linearStepPercent": (dc.get("linearConfiguration") or {}).get("stepPercent"),
+                "linearStepBakeTimeMinutes": (dc.get("linearConfiguration") or {}).get("stepBakeTimeInMinutes"),
+                "alarms": dc.get("alarms"),
+                "lifecycleHooks": [
+                    {
+                        "targetType": h.get("targetType"),
+                        "hookTargetArn": h.get("hookTargetArn"),
+                        "stages": h.get("lifecycleStages") or [],
+                    }
+                    for h in (dc.get("lifecycleHooks") or [])
+                ],
+            },
             "deployments": [
                 {
+                    "id": d.get("id"),
                     "status": d.get("status"),
                     "taskDefinition": (d.get("taskDefinition") or "").split("/")[-1],
                     "desired": d.get("desiredCount"),
@@ -2130,6 +2150,8 @@ def get_resources(m: Manifest) -> dict:
                     "pending": d.get("pendingCount"),
                     "failed": d.get("failedTasks"),
                     "rolloutState": d.get("rolloutState"),
+                    "rolloutStateReason": d.get("rolloutStateReason"),
+                    "createdAt": d.get("createdAt"),
                     "updatedAt": d.get("updatedAt"),
                 }
                 for d in service.get("deployments", [])

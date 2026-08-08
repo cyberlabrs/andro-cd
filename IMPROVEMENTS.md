@@ -201,12 +201,20 @@ any non-ROLLING strategy. Reconciler now emits `deploymentController=ECS` when a
 strategy is set, threads `advancedConfiguration` through the loadBalancer entry,
 diff-detects drift on strategy/bakeTime/canaryPercent/linearStepPercent/alarms/hooks.
 
+Just landed: **UI for deployment strategy state**. Overview tab now has a dedicated
+Deployment-strategy panel: colored strategy badge (Blue/Green, Canary, Linear), live
+bake-time countdown ticking every 5 s from the primary deployment's `updatedAt`, canary
+slice %, linear step %, rollback-alarm list with `auto-rollback` suffix, and full
+lifecycle-hook list (targetType, hook name, bound stages). Deployment rows also carry
+`rolloutStateReason` as a hover tooltip. Backend `/api/apps/{name}/resources` exposes
+the deploymentStrategy block plus `id`, `createdAt`, `rolloutStateReason` per deployment.
+
 1. **Grafana dashboard JSON** — ship a ready-made dashboard for the Prometheus metrics.
 2. **Backoff & retry** — exponential backoff per app on repeated sync failures instead of
    retrying every loop; circuit-break an app after N failures with manual reset.
 3. **AWS rate limit handling** — botocore adaptive retry mode, jitter between apps.
 4. **CLI expansion** — `androcd diff`, `androcd sync <app>`, `androcd logs <app>`
    hitting the API from CI.
-5. **UI for deployment strategy state** — surface the active strategy, current bake
-   remaining, and lifecycle-hook history on the Overview tab (data is in the ECS
-   service response already).
+5. **End-to-end smoke suite against real AWS** — walk a demo manifest through each
+   new feature (blue/green, canary, EFS, FireLens, Service Connect) with `moto`/
+   `Stubber` to catch shape mismatches unit tests can't.

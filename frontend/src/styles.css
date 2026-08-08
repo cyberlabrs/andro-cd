@@ -786,6 +786,23 @@ body {
 :root[data-theme="dark"] .diff-toolbar { background: #101a2b; }
 :root[data-theme="dark"] .diff-fold { border-color: #2c3a55; }
 
+/* Deployment strategy badges — colored so users spot progressive delivery instantly. */
+.badge.strategy { margin-left: 8px; font-weight: 600; }
+.badge.strategy-blue-green { background: #dbeafe; color: #1e3a8a; }
+.badge.strategy-canary     { background: #fef3c7; color: #92400e; }
+.badge.strategy-linear     { background: #e0e7ff; color: #3730a3; }
+:root[data-theme="dark"] .badge.strategy-blue-green { background: #1e3a5f; color: #93c5fd; }
+:root[data-theme="dark"] .badge.strategy-canary     { background: #5a3a10; color: #fcd34d; }
+:root[data-theme="dark"] .badge.strategy-linear     { background: #2a2358; color: #a5b4fc; }
+.hooks-list { display: flex; flex-direction: column; gap: 4px; }
+.hook-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  padding: 3px 0;
+}
+
 .history-entry {
   border-bottom: 1px solid var(--border);
   padding: 8px 0;

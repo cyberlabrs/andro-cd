@@ -172,7 +172,22 @@ export interface Resources {
     circuitBreaker: { enable: boolean; rollback: boolean } | null;
     minimumHealthyPercent: number | null;
     maximumPercent: number | null;
+    deploymentStrategy: {
+      type: "ROLLING" | "BLUE_GREEN" | "CANARY" | "LINEAR";
+      bakeTimeMinutes: number | null;
+      canaryPercent: number | null;
+      canaryBakeTimeMinutes: number | null;
+      linearStepPercent: number | null;
+      linearStepBakeTimeMinutes: number | null;
+      alarms: { alarmNames: string[]; rollback: boolean; enable: boolean } | null;
+      lifecycleHooks: {
+        targetType: string;
+        hookTargetArn: string | null;
+        stages: string[];
+      }[];
+    } | null;
     deployments: {
+      id: string | null;
       status: string;
       taskDefinition: string;
       desired: number;
@@ -180,6 +195,8 @@ export interface Resources {
       pending: number;
       failed: number;
       rolloutState: string | null;
+      rolloutStateReason: string | null;
+      createdAt: string | null;
       updatedAt: string | null;
     }[];
     events: { createdAt: string | null; message: string }[];

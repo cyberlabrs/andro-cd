@@ -62,3 +62,24 @@ raw data (`commit`, `actions`, `outcome`, `message`, `durationMs`, `images`) per
 the `sync_history` table and is served by `GET /api/apps/{name}/history`.
 
 The [audit log](security.md#audit-log) adds the who/when/from-where dimension on top.
+
+## Deployment strategy state (Overview tab)
+
+When a service opts into a non-rolling strategy
+([blue/green, canary, linear](operations.md#deployment-strategies-native-bluegreen-canary-linear)),
+the **Overview** tab surfaces a dedicated **Deployment strategy** panel:
+
+- Colored strategy badge (Blue/Green, Canary, Linear).
+- **Bake time countdown** — a live progress bar that ticks every 5 s from the
+  primary deployment's `updatedAt` timestamp, showing `Xm YYs remaining` and
+  `bake N%`. When the deployment enters a new stage, the countdown restarts against
+  the new `updatedAt`.
+- **CANARY / LINEAR sizing** — canary slice %, linear step %, per-step bake time.
+- **Rollback alarms** — the CloudWatch alarms wired for auto-rollback, with a clear
+  `auto-rollback` suffix when `alarms.rollback = true`.
+- **Lifecycle hooks** — the full list of `AWS_LAMBDA` / `PAUSE` hooks with the
+  stages each fires at.
+
+The deployments list below the panel now also carries `rolloutStateReason` as a
+tooltip on each row — hover to see AWS's own explanation for the current stage
+(e.g. "ECS deployment is bake in progress").

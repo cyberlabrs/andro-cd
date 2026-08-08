@@ -29,7 +29,9 @@ The full, continuously updated list lives in
 - UI: Argo-style dashboard, live logs, task forensics, **deployment timeline** (outcome,
   commit, images, duration per deploy), dark mode, URL-shared filters,
   **rich side-by-side diff** (YAML/JSON toggle, syntax highlighting, line numbers,
-  synchronized scrolling, hide-unchanged fold, +N/−N stats)
+  synchronized scrolling, hide-unchanged fold, +N/−N stats), **deployment strategy
+  panel** on the Overview tab (colored badge, live bake-time countdown, canary/linear
+  sizing, rollback alarms, lifecycle-hook list)
 
 ## Next up
 
@@ -39,8 +41,9 @@ The full, continuously updated list lives in
 3. **AWS rate-limit handling** — botocore adaptive retry mode, jitter between apps.
 4. **CLI expansion** — `androcd diff`, `androcd sync <app>`, `androcd logs <app>`
    hitting the API from CI.
-5. **UI for deployment strategy state** — surface the active strategy, current bake
-   remaining, and lifecycle-hook history on the Overview tab.
+5. **End-to-end smoke tests against real AWS** — walk a demo manifest through each
+   new feature (blue/green, canary, EFS, FireLens, Service Connect) to catch
+   shape mismatches unit tests can't.
 
 ## Contributing
 
