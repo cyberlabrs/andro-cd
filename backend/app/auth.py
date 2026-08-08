@@ -22,6 +22,13 @@ router = APIRouter(prefix="/api/auth")
 SESSION_COOKIE = "androcd_session"
 STATE_COOKIE = "androcd_oauth_state"
 SESSION_TTL = 8 * 3600
+# Renewal threshold: if a session has less than this many seconds until expiry,
+# the auth middleware silently issues a fresh cookie on the next request. Keeps
+# active users logged in indefinitely without punishing idle ones.
+SESSION_RENEW_WITHIN = 2 * 3600
+# Absolute cap: no session survives longer than this from initial login, even
+# with continuous renewal — bounds the blast radius of a stolen cookie.
+SESSION_ABSOLUTE_TTL = 30 * 24 * 3600
 
 GITHUB_AUTHORIZE = "https://github.com/login/oauth/authorize"
 GITHUB_TOKEN = "https://github.com/login/oauth/access_token"
@@ -35,8 +42,9 @@ def _sign(payload: str) -> str:
     return hmac.new(settings.session_secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
 
 
-def create_session(user: dict) -> str:
-    data = {**user, "exp": int(time.time()) + SESSION_TTL}
+def create_session(user: dict, iat: Optional[int] = None) -> str:
+    now = int(time.time())
+    data = {**user, "iat": iat or now, "exp": now + SESSION_TTL}
     payload = base64.urlsafe_b64encode(json.dumps(data).encode()).decode().rstrip("=")
     return f"{payload}.{_sign(payload)}"
 
@@ -51,9 +59,33 @@ def verify_session(token: str) -> Optional[dict]:
         data = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
     except Exception:
         return None
-    if data.get("exp", 0) < time.time():
+    now = time.time()
+    if data.get("exp", 0) < now:
+        return None
+    # Absolute cap: once a session is older than SESSION_ABSOLUTE_TTL from its
+    # initial login (iat), it cannot be renewed regardless of exp.
+    iat = data.get("iat")
+    if iat and now - iat > SESSION_ABSOLUTE_TTL:
         return None
     return data
+
+
+def should_renew(session: dict) -> bool:
+    """True when the session is close enough to expiry to warrant re-issuing."""
+    exp = session.get("exp", 0)
+    iat = session.get("iat")
+    if exp - time.time() > SESSION_RENEW_WITHIN:
+        return False
+    # Never renew past the absolute cap: a session issued 30d ago silently expires.
+    if iat and time.time() - iat > SESSION_ABSOLUTE_TTL - SESSION_TTL:
+        return False
+    return True
+
+
+def renew_session(session: dict) -> str:
+    """Issue a fresh cookie for an existing session (preserves iat)."""
+    user = {k: v for k, v in session.items() if k not in ("iat", "exp")}
+    return create_session(user, iat=session.get("iat"))
 
 
 # ---------- GitHub API ----------

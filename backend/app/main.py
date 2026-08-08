@@ -189,8 +189,14 @@ async def auth_middleware(request: Request, call_next):
                 if not user:
                     return JSONResponse({"detail": "authentication required"}, status_code=401)
                 request.state.user = user
+                if auth.should_renew(user):
+                    request.state.renew_session = auth.renew_session(user)
 
     response = await call_next(request)
+    renewed = getattr(request.state, "renew_session", None)
+    if renewed:
+        response.set_cookie(auth.SESSION_COOKIE, renewed, max_age=auth.SESSION_TTL,
+                            httponly=True, samesite="lax", secure=settings.cookie_secure)
     for name, value in SECURITY_HEADERS.items():
         response.headers.setdefault(name, value)
     if settings.cookie_secure:
