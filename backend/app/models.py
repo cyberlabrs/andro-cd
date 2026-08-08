@@ -18,6 +18,26 @@ class HealthCheckSpec(BaseModel):
     startPeriod: Optional[int] = None
 
 
+class MountPointSpec(BaseModel):
+    """Bind a task volume into a container's filesystem."""
+    sourceVolume: str                    # matches TaskDefinitionSpec.volumes[].name
+    containerPath: str
+    readOnly: bool = False
+
+
+class FirelensSpec(BaseModel):
+    """Turn a container into a FireLens log router (fluentbit/fluentd)."""
+    type: str = "fluentbit"              # fluentbit | fluentd
+    options: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("type")
+    @classmethod
+    def _type(cls, v: str) -> str:
+        if v not in ("fluentbit", "fluentd"):
+            raise ValueError("firelens.type must be 'fluentbit' or 'fluentd'")
+        return v
+
+
 class ContainerSpec(BaseModel):
     name: str
     image: str
@@ -32,6 +52,12 @@ class ContainerSpec(BaseModel):
     entryPoint: Optional[list[str]] = None
     logGroup: Optional[str] = None
     healthCheck: Optional[HealthCheckSpec] = None
+    mountPoints: list[MountPointSpec] = Field(default_factory=list)
+    dependsOn: list[dict[str, str]] = Field(default_factory=list)  # [{containerName, condition}]
+    # Free-form logConfiguration lets a container send logs to FireLens (driver: awsfirelens)
+    # or any other custom driver. When set, `logGroup` is ignored.
+    logConfiguration: Optional[dict[str, Any]] = None
+    firelensConfiguration: Optional[FirelensSpec] = None
 
     def env_list(self) -> list[dict[str, str]]:
         if isinstance(self.environment, dict):
@@ -56,6 +82,33 @@ class ContainerSpec(BaseModel):
         return sorted(ports, key=lambda p: p["containerPort"])
 
 
+class EFSAuthorizationSpec(BaseModel):
+    accessPointId: Optional[str] = None      # scoped access via EFS Access Point
+    iam: bool = False                        # use task IAM role for EFS mount
+
+
+class EFSVolumeConfig(BaseModel):
+    fileSystemId: str                        # fs-XXXXXXXX
+    rootDirectory: str = "/"
+    transitEncryption: bool = True           # required when accessPointId is set
+    transitEncryptionPort: Optional[int] = None
+    authorizationConfig: Optional[EFSAuthorizationSpec] = None
+
+
+class VolumeSpec(BaseModel):
+    """A task-level volume that containers can mount via ContainerSpec.mountPoints."""
+    name: str
+    efs: Optional[EFSVolumeConfig] = None
+
+    @model_validator(mode="after")
+    def _one_backend(self) -> "VolumeSpec":
+        # Only EFS is supported today. When we add more backends (host, dockerVolume,
+        # FSx) this will enforce exactly-one.
+        if self.efs is None:
+            raise ValueError(f"volume '{self.name}' requires an efs config")
+        return self
+
+
 class TaskDefinitionSpec(BaseModel):
     family: Optional[str] = None
     cpu: str = "256"
@@ -65,6 +118,18 @@ class TaskDefinitionSpec(BaseModel):
     executionRoleArn: Optional[str] = None
     taskRoleArn: Optional[str] = None
     containers: list[ContainerSpec] = Field(min_length=1)
+    volumes: list[VolumeSpec] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _mount_points_reference_volumes(self) -> "TaskDefinitionSpec":
+        volume_names = {v.name for v in self.volumes}
+        for c in self.containers:
+            for mp in c.mountPoints:
+                if mp.sourceVolume not in volume_names:
+                    raise ValueError(
+                        f"container '{c.name}' mounts unknown volume '{mp.sourceVolume}' "
+                        f"(declare it under spec.taskDefinition.volumes)")
+        return self
 
     @field_validator("cpu", "memory", mode="before")
     @classmethod
@@ -83,6 +148,10 @@ class AutoscalingSpec(BaseModel):
     maxCount: int
     targetCpu: Optional[int] = None      # target CPU utilization %
     targetMemory: Optional[int] = None   # target memory utilization %
+    # Requires spec.service.loadBalancer (either targetGroupArn or create). Value is
+    # the target average requests/target/minute the ALB should hold each task at —
+    # AWS calls this metric ALBRequestCountPerTarget.
+    targetRequestsPerTarget: Optional[float] = None
 
 
 class LBHealthCheckSpec(BaseModel):
@@ -152,6 +221,27 @@ class CapacityProviderSpec(BaseModel):
     base: int = 0
 
 
+class ServiceConnectClientAlias(BaseModel):
+    """DNS name + port the client uses inside the namespace to reach this service."""
+    port: int
+    dnsName: Optional[str] = None      # defaults to the discovery name (AWS behavior)
+
+
+class ServiceConnectService(BaseModel):
+    """One port of the task advertised via Service Connect."""
+    portName: str                      # matches taskDefinition.containers[].portMappings[].name
+    discoveryName: Optional[str] = None  # cloud-map service; defaults to portName
+    clientAliases: list[ServiceConnectClientAlias] = Field(default_factory=list)
+
+
+class ServiceConnectSpec(BaseModel):
+    """Per-service Service Connect config. `namespace` overrides the cluster default;
+    otherwise uses spec.serviceConnectNamespace of the cluster kind."""
+    enabled: bool = True
+    namespace: Optional[str] = None    # cloud-map namespace name or ARN
+    services: list[ServiceConnectService] = Field(default_factory=list)
+
+
 class ServiceSettings(BaseModel):
     desiredCount: int = 1
     launchType: str = "FARGATE"
@@ -163,6 +253,7 @@ class ServiceSettings(BaseModel):
     autoscaling: Optional[AutoscalingSpec] = None
     loadBalancer: Optional[LoadBalancerSpec] = None
     capacityProviders: list[CapacityProviderSpec] = Field(default_factory=list)
+    serviceConnect: Optional[ServiceConnectSpec] = None
 
 
 class HookSpec(BaseModel):
@@ -327,6 +418,13 @@ class Manifest(BaseModel):
             raise ValueError(f"spec.taskDefinition is required for kind {self.kind}")
         if self.kind == "ECSScheduledTask" and self.spec.schedule is None:
             raise ValueError("spec.schedule is required for kind ECSScheduledTask")
+        # ALB request-count autoscaling needs a target group to reference in the
+        # ResourceLabel: reject the combination at parse time with a clear message
+        # rather than later when the ECS API rejects the policy.
+        a = self.spec.service.autoscaling if self.spec.service else None
+        if a and a.targetRequestsPerTarget is not None and not (self.spec.service and self.spec.service.loadBalancer):
+            raise ValueError(
+                "autoscaling.targetRequestsPerTarget requires spec.service.loadBalancer")
         return self
 
     @property

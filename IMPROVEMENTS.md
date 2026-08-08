@@ -74,8 +74,10 @@ and roughly ordered by value/effort inside each group.
   (`AUTH_MODE=oidc`, discovery-based, PKCE + nonce + JWKS id-token verification; works with
   Google/Okta/Keycloak/Dex/Auth0/Azure AD, with user/domain/group allowlists). Signed httpOnly
   session cookies; all `/api` routes protected except the auth flow and the HMAC-verified
-  webhook. API tokens for CI — `API_TOKENS=token:role` as `Authorization: Bearer`)*.
-  Still to do: refresh of expired sessions.
+  webhook. API tokens for CI — `API_TOKENS=token:role` as `Authorization: Bearer`.
+  Sliding-window session refresh: the auth middleware silently re-issues the cookie when it
+  falls inside `SESSION_RENEW_WITHIN` of expiry (2h by default), capped at
+  `SESSION_ABSOLUTE_TTL` (30d) from the initial login so a leaked cookie cannot be renewed forever)*.
 - **RBAC** *(done — viewer/operator/admin roles via `RBAC_ADMINS`/`RBAC_OPERATORS`/
   `RBAC_DEFAULT_ROLE`; enforced on API endpoints and reflected in the UI)*. Still to do:
   GitHub team-based mapping, per-project roles.
@@ -173,16 +175,23 @@ and roughly ordered by value/effort inside each group.
 
 ## Suggested next 5 (best value / effort)
 
-Latest batch done: `ECSTask` kind (one-off jobs + run-now), deployment timeline UI, managed
-load balancers (ALB TG + listener rule creation), generic OIDC login, HA leader election,
-values-file templating, sync windows, dry-run mode, capacity providers (FARGATE_SPOT),
-container health checks, tags/cost allocation, task definition cleanup, JSON logging — on top
-of the security batch (audit log, API tokens, CSP/CSRF/rate limits, non-root container, JSON
-Schema, readiness endpoint). Next up:
+Latest batch done: EFS task volumes (with EFS access-point + IAM auth), FireLens sidecars
+(`awsfirelens` log driver + fluentbit/fluentd router container), ALB request-count
+autoscaling (`ALBRequestCountPerTarget` target-tracking, resolves the ResourceLabel from
+either a referenced or managed target group), Service Connect per-service configuration
+(`enabled`/namespace/services/clientAliases, diffed and applied via `forceNewDeployment`),
+sliding-window session refresh with an absolute cap. Previous batch: `ECSTask` kind
+(one-off jobs + run-now), deployment timeline UI, managed load balancers (ALB TG + listener
+rule creation), generic OIDC login, HA leader election, values-file templating, sync
+windows, dry-run mode, capacity providers (FARGATE_SPOT), container health checks,
+tags/cost allocation, task definition cleanup, JSON logging — on top of the security batch
+(audit log, API tokens, CSP/CSRF/rate limits, non-root container, JSON Schema, readiness
+endpoint). Next up:
 
-1. **EFS volumes & FireLens sidecars** — round out task definition coverage.
-2. **ALB request-count autoscaling** — target-tracking on `ALBRequestCountPerTarget`
-   (now that managed target groups exist).
-3. **Service Connect / Cloud Map** — service discovery config in the manifest.
-4. **Session refresh** — silently renew expiring sessions instead of forcing re-login.
-5. **Grafana dashboard JSON** — ship a ready-made dashboard for the Prometheus metrics.
+1. **Grafana dashboard JSON** — ship a ready-made dashboard for the Prometheus metrics.
+2. **Side-by-side diff view** — live vs desired YAML with syntax highlighting.
+3. **Backoff & retry** — exponential backoff per app on repeated sync failures instead of
+   retrying every loop; circuit-break an app after N failures with manual reset.
+4. **AWS rate limit handling** — botocore adaptive retry mode, jitter between apps.
+5. **CLI expansion** — `androcd diff`, `androcd sync <app>`, `androcd logs <app>`
+   hitting the API from CI.

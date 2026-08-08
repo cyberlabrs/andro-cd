@@ -120,7 +120,11 @@ def desired_container_definitions(m: Manifest, region: str) -> list[dict]:
             d["command"] = c.command
         if c.entryPoint:
             d["entryPoint"] = c.entryPoint
-        if c.logGroup:
+        # logConfiguration precedence: explicit block (e.g. awsfirelens) wins over
+        # the logGroup shortcut, so users can send logs to a FireLens sidecar.
+        if c.logConfiguration:
+            d["logConfiguration"] = c.logConfiguration
+        elif c.logGroup:
             d["logConfiguration"] = {
                 "logDriver": "awslogs",
                 "options": {
@@ -129,6 +133,22 @@ def desired_container_definitions(m: Manifest, region: str) -> list[dict]:
                     "awslogs-stream-prefix": c.name,
                 },
             }
+        if c.mountPoints:
+            d["mountPoints"] = [
+                {"sourceVolume": mp.sourceVolume, "containerPath": mp.containerPath,
+                 "readOnly": mp.readOnly}
+                for mp in c.mountPoints
+            ]
+        if c.dependsOn:
+            d["dependsOn"] = [
+                {"containerName": dep["containerName"], "condition": dep["condition"]}
+                for dep in c.dependsOn
+            ]
+        if c.firelensConfiguration:
+            fl: dict[str, Any] = {"type": c.firelensConfiguration.type}
+            if c.firelensConfiguration.options:
+                fl["options"] = dict(c.firelensConfiguration.options)
+            d["firelensConfiguration"] = fl
         if c.healthCheck:
             hc: dict[str, Any] = {
                 "command": c.healthCheck.command,
@@ -190,9 +210,30 @@ def _register_kwargs(m: Manifest, region: str) -> dict:
         kwargs["executionRoleArn"] = td.executionRoleArn
     if td.taskRoleArn:
         kwargs["taskRoleArn"] = td.taskRoleArn
+    if td.volumes:
+        kwargs["volumes"] = [_volume_definition(v) for v in td.volumes]
     if m.metadata.labels:
         kwargs["tags"] = _aws_tags(m)
     return kwargs
+
+
+def _volume_definition(v) -> dict:
+    """Volume block for register_task_definition. EFS-only today."""
+    efs = v.efs
+    cfg: dict[str, Any] = {
+        "fileSystemId": efs.fileSystemId,
+        "rootDirectory": efs.rootDirectory,
+        "transitEncryption": "ENABLED" if efs.transitEncryption else "DISABLED",
+    }
+    if efs.transitEncryptionPort is not None:
+        cfg["transitEncryptionPort"] = efs.transitEncryptionPort
+    if efs.authorizationConfig:
+        ac = {}
+        if efs.authorizationConfig.accessPointId:
+            ac["accessPointId"] = efs.authorizationConfig.accessPointId
+        ac["iam"] = "ENABLED" if efs.authorizationConfig.iam else "DISABLED"
+        cfg["authorizationConfig"] = ac
+    return {"name": v.name, "efsVolumeConfiguration": cfg}
 
 
 def _deployment_configuration(m: Manifest) -> dict:
@@ -433,7 +474,90 @@ def _prune_managed_lb(m: Manifest, region: str) -> list[str]:
     return actions
 
 
-def _autoscaling_changes(m: Manifest, region: str) -> list[str]:
+def _service_connect_config(m: Manifest) -> Optional[dict]:
+    """Build serviceConnectConfiguration for create_service/update_service.
+    Returns None when the service does not opt in — the parent code must then omit
+    the field, NOT pass {'enabled': False}, so a service that never used Service
+    Connect isn't churned on every reconcile."""
+    sc = m.spec.service.serviceConnect
+    if sc is None:
+        return None
+    cfg: dict[str, Any] = {"enabled": sc.enabled}
+    if sc.namespace:
+        cfg["namespace"] = sc.namespace
+    if sc.services:
+        cfg["services"] = [
+            {
+                "portName": s.portName,
+                **({"discoveryName": s.discoveryName} if s.discoveryName else {}),
+                **({"clientAliases": [
+                    {"port": a.port, **({"dnsName": a.dnsName} if a.dnsName else {})}
+                    for a in s.clientAliases]} if s.clientAliases else {}),
+            }
+            for s in sc.services
+        ]
+    return cfg
+
+
+def _norm_service_connect(cfg: Optional[dict]) -> dict:
+    """Order-independent view of a Service Connect config for stable comparison."""
+    if not cfg or not cfg.get("enabled"):
+        return {"enabled": False}
+    services = []
+    for s in cfg.get("services") or []:
+        services.append((
+            s.get("portName"),
+            s.get("discoveryName") or s.get("portName"),
+            tuple(sorted(
+                (a.get("port"), a.get("dnsName")) for a in (s.get("clientAliases") or [])
+            )),
+        ))
+    return {
+        "enabled": True,
+        "namespace": cfg.get("namespace") or "",
+        "services": sorted(services),
+    }
+
+
+def _service_connect_changes(m: Manifest, service: dict) -> list[str]:
+    desired = _service_connect_config(m)
+    live = service.get("serviceConnectConfiguration")
+    # If the manifest doesn't specify serviceConnect at all, leave the live config
+    # untouched — users may have set it out of band and Andro-CD shouldn't disable it.
+    if desired is None:
+        return []
+    if _norm_service_connect(desired) != _norm_service_connect(live):
+        return [f"serviceConnect: {_norm_service_connect(live)} -> {_norm_service_connect(desired)}"]
+    return []
+
+
+def _alb_request_resource_label(m: Manifest, region: str, managed_tg_arn: Optional[str]) -> Optional[str]:
+    """Build the ResourceLabel that ALBRequestCountPerTarget requires:
+        app/<alb-name>/<alb-id>/targetgroup/<tg-name>/<tg-id>
+    Returns None when the LB is not resolvable (autoscaling policy is then skipped)."""
+    lb = m.spec.service.loadBalancer
+    if not lb:
+        return None
+    tg_arn = managed_tg_arn or lb.targetGroupArn
+    if not tg_arn:
+        return None
+    elb = _client("elbv2", region, m)
+    try:
+        tg = elb.describe_target_groups(TargetGroupArns=[tg_arn])["TargetGroups"][0]
+    except ClientError:
+        return None
+    lb_arns = tg.get("LoadBalancerArns") or []
+    if not lb_arns:
+        return None  # target group not yet attached to any ALB — retry next reconcile
+    # tg_arn: arn:...:targetgroup/<name>/<id>  →  targetgroup/<name>/<id>
+    tg_part = "targetgroup/" + tg_arn.split(":targetgroup/", 1)[1]
+    # alb ARN: arn:...:loadbalancer/app/<name>/<id>  →  app/<name>/<id>
+    alb_part = lb_arns[0].split(":loadbalancer/", 1)[1]
+    return f"{alb_part}/{tg_part}"
+
+
+def _autoscaling_changes(m: Manifest, region: str,
+                         managed_tg_arn: Optional[str] = None) -> list[str]:
     a = m.spec.service.autoscaling
     aas = _client("application-autoscaling", region, m)
     resource_id = f"service/{m.spec.cluster}/{m.name}"
@@ -457,9 +581,10 @@ def _autoscaling_changes(m: Manifest, region: str) -> list[str]:
         ServiceNamespace="ecs", ResourceId=resource_id,
         ScalableDimension="ecs:service:DesiredCount",
     ).get("ScalingPolicies", [])}
-    for metric, target_value, suffix in (
-        ("ECSServiceAverageCPUUtilization", a.targetCpu, "cpu"),
-        ("ECSServiceAverageMemoryUtilization", a.targetMemory, "memory"),
+    for metric, target_value, suffix, unit in (
+        ("ECSServiceAverageCPUUtilization", a.targetCpu, "cpu", "%"),
+        ("ECSServiceAverageMemoryUtilization", a.targetMemory, "memory", "%"),
+        ("ALBRequestCountPerTarget", a.targetRequestsPerTarget, "requests", "/target"),
     ):
         name = f"androcd-{m.name}-{suffix}"
         live_policy = policies.get(name)
@@ -467,12 +592,13 @@ def _autoscaling_changes(m: Manifest, region: str) -> list[str]:
         if target_value is None and live_policy:
             changes.append(f"autoscaling {suffix} policy will be removed")
         elif target_value is not None and live_target != float(target_value):
-            changes.append(f"autoscaling {suffix} target: {live_target} -> {target_value}")
+            changes.append(f"autoscaling {suffix} target: {live_target} -> {target_value}{unit}")
     return changes
 
 
-def _apply_autoscaling(m: Manifest, region: str) -> list[str]:
-    if not _autoscaling_changes(m, region):
+def _apply_autoscaling(m: Manifest, region: str,
+                       managed_tg_arn: Optional[str] = None) -> list[str]:
+    if not _autoscaling_changes(m, region, managed_tg_arn):
         return []
     a = m.spec.service.autoscaling
     aas = _client("application-autoscaling", region, m)
@@ -488,9 +614,11 @@ def _apply_autoscaling(m: Manifest, region: str) -> list[str]:
         ScalableDimension="ecs:service:DesiredCount",
         MinCapacity=a.minCount, MaxCapacity=a.maxCount)
     actions.append(f"configured autoscaling {a.minCount}-{a.maxCount} tasks")
-    for metric, target_value, suffix in (
-        ("ECSServiceAverageCPUUtilization", a.targetCpu, "cpu"),
-        ("ECSServiceAverageMemoryUtilization", a.targetMemory, "memory"),
+    alb_label = None
+    for metric, target_value, suffix, unit in (
+        ("ECSServiceAverageCPUUtilization", a.targetCpu, "cpu", "%"),
+        ("ECSServiceAverageMemoryUtilization", a.targetMemory, "memory", "%"),
+        ("ALBRequestCountPerTarget", a.targetRequestsPerTarget, "requests", "/target"),
     ):
         name = f"androcd-{m.name}-{suffix}"
         if target_value is None:
@@ -501,15 +629,26 @@ def _apply_autoscaling(m: Manifest, region: str) -> list[str]:
             except ClientError:
                 pass
             continue
+        if metric == "ALBRequestCountPerTarget":
+            if alb_label is None:
+                alb_label = _alb_request_resource_label(m, region, managed_tg_arn)
+            if alb_label is None:
+                # target group not attached yet — surface and skip; a later reconcile retries
+                actions.append(
+                    f"autoscaling {suffix} target skipped (load balancer not resolvable yet)")
+                continue
+            spec = {"PredefinedMetricType": metric, "ResourceLabel": alb_label}
+        else:
+            spec = {"PredefinedMetricType": metric}
         aas.put_scaling_policy(
             PolicyName=name, ServiceNamespace="ecs", ResourceId=resource_id,
             ScalableDimension="ecs:service:DesiredCount",
             PolicyType="TargetTrackingScaling",
             TargetTrackingScalingPolicyConfiguration={
                 "TargetValue": float(target_value),
-                "PredefinedMetricSpecification": {"PredefinedMetricType": metric},
+                "PredefinedMetricSpecification": spec,
             })
-        actions.append(f"set autoscaling {suffix} target {target_value}%")
+        actions.append(f"set autoscaling {suffix} target {target_value}{unit}")
     return actions
 
 
@@ -552,8 +691,40 @@ def _norm_container(c: dict) -> dict:
         ),
         "command": c.get("command") or None,
         "entryPoint": c.get("entryPoint") or None,
-        "logConfiguration": c.get("logConfiguration") or None,
+        "logConfiguration": _norm_log_configuration(c.get("logConfiguration")),
         "healthCheck": _norm_healthcheck(c.get("healthCheck")),
+        "mountPoints": sorted(
+            [{"sourceVolume": mp.get("sourceVolume"),
+              "containerPath": mp.get("containerPath"),
+              "readOnly": bool(mp.get("readOnly"))}
+             for mp in c.get("mountPoints") or []],
+            key=lambda mp: (mp["sourceVolume"], mp["containerPath"]),
+        ),
+        "dependsOn": sorted(
+            [{"containerName": d.get("containerName"), "condition": d.get("condition")}
+             for d in c.get("dependsOn") or []],
+            key=lambda d: (d["containerName"], d["condition"]),
+        ),
+        "firelensConfiguration": _norm_firelens(c.get("firelensConfiguration")),
+    }
+
+
+def _norm_log_configuration(lc: Optional[dict]) -> Optional[dict]:
+    """Sort options so a describe response and a fresh dict compare equal."""
+    if not lc:
+        return None
+    return {
+        "logDriver": lc.get("logDriver"),
+        "options": dict(sorted((lc.get("options") or {}).items())),
+    }
+
+
+def _norm_firelens(fl: Optional[dict]) -> Optional[dict]:
+    if not fl:
+        return None
+    return {
+        "type": fl.get("type"),
+        "options": dict(sorted((fl.get("options") or {}).items())),
     }
 
 
@@ -581,6 +752,29 @@ def _norm_taskdef(td: dict) -> dict:
             [_norm_container(c) for c in td.get("containerDefinitions", [])],
             key=lambda c: c["name"],
         ),
+        "volumes": sorted(
+            [_norm_volume(v) for v in td.get("volumes") or []],
+            key=lambda v: v["name"],
+        ),
+    }
+
+
+def _norm_volume(v: dict) -> dict:
+    """Compare only fields Andro-CD manages (EFS today), ignoring AWS-injected extras."""
+    efs = v.get("efsVolumeConfiguration") or {}
+    ac = efs.get("authorizationConfig") or {}
+    return {
+        "name": v.get("name"),
+        "efs": {
+            "fileSystemId": efs.get("fileSystemId"),
+            "rootDirectory": efs.get("rootDirectory") or "/",
+            "transitEncryption": (efs.get("transitEncryption") or "DISABLED").upper(),
+            "transitEncryptionPort": efs.get("transitEncryptionPort"),
+            "authorizationConfig": {
+                "accessPointId": ac.get("accessPointId") or None,
+                "iam": (ac.get("iam") or "DISABLED").upper(),
+            } if ac else None,
+        } if efs else None,
     }
 
 
@@ -590,6 +784,10 @@ def _taskdef_changes(live: dict, desired: dict) -> list[str]:
     for key in ("cpu", "memory", "networkMode", "executionRoleArn", "taskRoleArn"):
         if a[key] != b[key]:
             changes.append(f"taskDefinition.{key}: {a[key]} -> {b[key]}")
+    if a["volumes"] != b["volumes"]:
+        live_names = [v["name"] for v in a["volumes"]]
+        desired_names = [v["name"] for v in b["volumes"]]
+        changes.append(f"taskDefinition.volumes: {live_names or None} -> {desired_names or None}")
     live_by_name = {c["name"]: c for c in a["containers"]}
     for c in b["containers"]:
         lc = live_by_name.pop(c["name"], None)
@@ -814,8 +1012,9 @@ def compute_diff(m: Manifest) -> dict:
         else:
             changes.extend(_lb_changes(m, service, managed_tg_arn))
         changes.extend(_capacity_changes(m, service))
+        changes.extend(_service_connect_changes(m, service))
         if m.spec.service.autoscaling or service:
-            changes.extend(_autoscaling_changes(m, region))
+            changes.extend(_autoscaling_changes(m, region, managed_tg_arn))
 
     return {
         "in_sync": not changes,
@@ -1008,6 +1207,9 @@ def apply(m: Manifest) -> list[str]:
         lbs = _load_balancers(m, managed_tg_arn)
         if lbs:
             create_kwargs["loadBalancers"] = lbs
+        sc_cfg = _service_connect_config(m)
+        if sc_cfg is not None:
+            create_kwargs["serviceConnectConfiguration"] = sc_cfg
         ecs.create_service(**create_kwargs)
         actions.append(f"created service '{m.name}'")
     else:
@@ -1015,6 +1217,7 @@ def apply(m: Manifest) -> list[str]:
         desired_net = net_config["awsvpcConfiguration"]
         count_drift = (not m.spec.service.autoscaling
                        and service.get("desiredCount") != m.spec.service.desiredCount)
+        sc_changes = _service_connect_changes(m, service)
         needs_update = (
             service.get("taskDefinition") != td_arn
             or count_drift
@@ -1024,6 +1227,7 @@ def apply(m: Manifest) -> list[str]:
             or bool(_deploy_config_changes(m, service))
             or bool(_lb_changes(m, service, managed_tg_arn))
             or bool(_capacity_changes(m, service))
+            or bool(sc_changes)
         )
         if needs_update:
             update_kwargs: dict[str, Any] = dict(
@@ -1041,10 +1245,13 @@ def apply(m: Manifest) -> list[str]:
                 # changing the strategy requires a fresh deployment
                 update_kwargs["capacityProviderStrategy"] = _capacity_strategy(m)
                 update_kwargs["forceNewDeployment"] = True
+            if sc_changes:
+                update_kwargs["serviceConnectConfiguration"] = _service_connect_config(m)
+                update_kwargs["forceNewDeployment"] = True
             ecs.update_service(**update_kwargs)
             actions.append(f"updated service '{m.name}'")
 
-    actions.extend(_apply_autoscaling(m, region))
+    actions.extend(_apply_autoscaling(m, region, managed_tg_arn))
 
     if m.spec.hooks.postSync:
         actions.extend(_run_hook(m, region, td_arn, m.spec.hooks.postSync, "postSync"))
