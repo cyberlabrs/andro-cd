@@ -731,11 +731,60 @@ body {
 
 .diff-cols { display: flex; gap: 12px; }
 .diff-col { flex: 1; min-width: 0; }
-.diff-pane { font-size: 11px; max-height: calc(100vh - 280px); overflow: auto; }
+.diff-col h3 { margin: 0 0 6px 0; font-size: 12px; text-transform: uppercase; color: var(--muted); letter-spacing: .04em; }
+.diff-pane { font-size: 11px; max-height: calc(100vh - 320px); overflow: auto; }
 .diff-pane div { white-space: pre; padding: 0 6px; min-height: 16px; }
 .diff-removed { background: #fdecea; color: #86160f; border-left: 3px solid var(--red); }
 .diff-added   { background: #e6f4ea; color: #04520b; border-left: 3px solid var(--green); }
 .diff-placeholder { background: #f5f7fa; color: transparent; border-left: 3px solid transparent; }
+
+.diff-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 8px;
+  margin-bottom: 8px;
+  background: var(--surface, #f5f7fa);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  gap: 12px;
+}
+.diff-toolbar-right { display: flex; align-items: center; gap: 12px; }
+.diff-stats { font-family: var(--mono, monospace); font-size: 12px; }
+.diff-stat-add { color: var(--green, #0a7c2f); margin-right: 8px; font-weight: 600; }
+.diff-stat-del { color: var(--red, #b0210a); font-weight: 600; }
+.diff-fold {
+  background: transparent;
+  color: var(--muted);
+  font-style: italic;
+  text-align: center;
+  border-top: 1px dashed var(--border);
+  border-bottom: 1px dashed var(--border);
+  padding: 2px 6px;
+  min-height: 16px;
+}
+.diff-ln {
+  display: inline-block;
+  width: 3.5em;
+  text-align: right;
+  padding-right: 8px;
+  color: var(--muted);
+  user-select: none;
+}
+/* Minimal YAML syntax colors — deliberately restrained to avoid clashing with the
+   add/remove backgrounds. */
+.y-key { color: #0451a5; font-weight: 500; }
+.y-colon { color: var(--muted); }
+.y-str { color: #a31515; }
+.y-num { color: #098658; }
+.y-bool { color: #af00db; }
+.y-val, .y-lead { color: inherit; }
+:root[data-theme="dark"] .y-key { color: #7cb7ff; }
+:root[data-theme="dark"] .y-str { color: #ff9d8f; }
+:root[data-theme="dark"] .y-num { color: #7ade87; }
+:root[data-theme="dark"] .y-bool { color: #d8b0ff; }
+:root[data-theme="dark"] .diff-toolbar { background: #101a2b; }
+:root[data-theme="dark"] .diff-fold { border-color: #2c3a55; }
 
 .history-entry {
   border-bottom: 1px solid var(--border);

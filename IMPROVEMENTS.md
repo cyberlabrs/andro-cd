@@ -135,8 +135,10 @@ and roughly ordered by value/effort inside each group.
 
 ## 6. UI / UX
 
-- **Side-by-side diff view** — live vs desired YAML/JSON with syntax highlighting, like Argo's
-  diff tab (currently changes are text bullets).
+- **Side-by-side diff view** *(done — Diff tab renders live vs desired side by side in YAML
+  (default) or JSON, with LCS-based line alignment, syntax-highlighted keys/strings/numbers,
+  line numbers, synchronized scrolling between panes, hide-unchanged mode that folds runs of
+  equal lines with a 2-line context, and +N/−N stats at the top)*.
 - **Search, filters, sorting** *(done — search over name/cluster/images/labels, status filter
   chips, sort by name/status/health/recency, all persisted in the URL — filters and the open
   app survive reload and are shareable)*.
@@ -188,8 +190,11 @@ tags/cost allocation, task definition cleanup, JSON logging — on top of the se
 (audit log, API tokens, CSP/CSRF/rate limits, non-root container, JSON Schema, readiness
 endpoint). Next up:
 
-1. **Grafana dashboard JSON** — ship a ready-made dashboard for the Prometheus metrics.
-2. **Side-by-side diff view** — live vs desired YAML with syntax highlighting.
+1. **ECS native blue/green + canary + linear** — AWS added these in Jul 2025 / May 2026
+   (deploymentController=ECS, strategy BLUE_GREEN|CANARY|LINEAR, bakeTime, 7 lifecycle
+   hooks, dark canary via test listener). Biggest 2026-era gap versus Argo Rollouts /
+   the native ECS controller.
+2. **Grafana dashboard JSON** — ship a ready-made dashboard for the Prometheus metrics.
 3. **Backoff & retry** — exponential backoff per app on repeated sync failures instead of
    retrying every loop; circuit-break an app after N failures with manual reset.
 4. **AWS rate limit handling** — botocore adaptive retry mode, jitter between apps.
