@@ -5,6 +5,14 @@ All notable changes are documented here. The format follows
 [Semantic Versioning](https://semver.org/). Entries are generated automatically by
 [release-please](https://github.com/googleapis/release-please).
 
+## [0.4.0](https://github.com/cyberlabrs/andro-cd/compare/v0.3.1...v0.4.0) (2026-08-08)
+
+
+### Features
+
+* **auth:** sliding-window session refresh with absolute cap ([3f56895](https://github.com/cyberlabrs/andro-cd/commit/3f5689510bc32a0a6cd3866b637ee177e9409af4))
+* EFS volumes, FireLens, Service Connect and ALB request autoscaling ([832aa96](https://github.com/cyberlabrs/andro-cd/commit/832aa9618f2fcf71c38dec5537ea835091c27174))
+
 ## [0.3.1](https://github.com/cyberlabrs/andro-cd/compare/v0.3.0...v0.3.1) (2026-07-23)
 
 
