@@ -206,15 +206,18 @@ Typical loop:
 
 ```bash
 cd examples/e2e
-cp values.yaml values.local.yaml && $EDITOR values.local.yaml
+./scripts/bootstrap.sh                  # auto-create AWS infra + write values.local.yaml
 ./scripts/preflight.sh                  # green check → ready
 ./scripts/run.sh                        # applies + waits + asserts, per scenario
-./scripts/cleanup.sh                    # tears everything down
+./scripts/cleanup.sh                    # drops ECS services (keep infra for next run)
+./scripts/teardown.sh                   # nuke everything bootstrap created (when done)
 ```
 
-See `examples/e2e/README.md` for the pre-existing infra checklist (VPC, ALB, EFS,
-alarms, Lambda) — the runner does not create these; it drives Andro-CD against
-resources you already own in a sandbox account.
+`bootstrap.sh` auto-discovers what already exists (default VPC, subnets) and
+creates whatever is missing (ALB, target groups, EFS, IAM roles, Lambda hook,
+CloudWatch alarm, Cloud Map namespace). Every resource it creates is tagged
+`androcd-e2e=true` so `teardown.sh` can find and remove them without touching
+anything else in the account.
 
 The same shape assertions run in-process against `moto`-mocked AWS as part of
 `pytest` (`backend/tests/test_e2e_moto.py`); the sandbox kit is the "does it hold up

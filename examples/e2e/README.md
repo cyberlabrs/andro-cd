@@ -11,8 +11,8 @@ one lands the way the unit + moto tests claim.
 
 - [`iam-policy.json`](iam-policy.json) — minimum IAM policy for the CI user driving
   Andro-CD (least-privilege, no wildcards outside your account/region).
-- [`values.yaml`](values.yaml) — one place to fill in your VPC / subnet / SG / TG /
-  role ARNs. Every manifest reads from it via Andro-CD's built-in `${key}` templating.
+- [`values.yaml`](values.yaml) — template of every value the manifests reference.
+  `scripts/bootstrap.sh` writes `values.local.yaml` for you.
 - [`manifests/`](manifests/) — one manifest per scenario:
     - `01-rolling.yaml` — default rolling update (baseline).
     - `02-autoscaling.yaml` — CPU + ALB request-count target tracking.
@@ -22,54 +22,62 @@ one lands the way the unit + moto tests claim.
     - `06-canary.yaml` — canary with lifecycle Lambda hook.
     - `07-scheduled-task.yaml` — EventBridge Scheduler cron.
     - `08-oneoff-task.yaml` — ECSTask run-now.
-- [`scripts/preflight.sh`](scripts/preflight.sh) — check AWS creds work + list the
-  values.yaml keys you still need to fill in.
-- [`scripts/run.sh`](scripts/run.sh) — one-command runner: applies each manifest,
-  waits for Synced+Healthy, checks a scenario-specific assertion, then moves on.
-- [`scripts/cleanup.sh`](scripts/cleanup.sh) — deletes every AWS resource the run
-  creates so you don't pay overnight.
+- [`scripts/bootstrap.sh`](scripts/bootstrap.sh) — **auto-discover + auto-create**
+  every AWS resource the suite needs (VPC/subnets/SG, ALB + listener, 2 target
+  groups, EFS + access point, IAM roles, CloudWatch alarm, Lambda hook, Cloud
+  Map namespace, ECS cluster). Tags everything `androcd-e2e=true` for later
+  cleanup. Writes `values.local.yaml` from what it found/created.
+- [`scripts/preflight.sh`](scripts/preflight.sh) — read-only sanity checks after
+  bootstrap (creds work, values.local.yaml complete, Andro-CD reachable).
+- [`scripts/run.sh`](scripts/run.sh) — drives Andro-CD through every scenario and
+  asserts scenario-specific outcomes against real AWS.
+- [`scripts/cleanup.sh`](scripts/cleanup.sh) — deletes only the resources the
+  **e2e run** creates (services, task defs, schedules). Leaves the bootstrapped
+  infra alone so you can re-run without re-bootstrapping.
+- [`scripts/teardown.sh`](scripts/teardown.sh) — deletes **everything**
+  `bootstrap.sh` created (tag-guarded so it can't touch anything else). Use this
+  when you're done with the suite entirely.
 
-## Prerequisites (your side, one-time)
+## Prerequisites
 
-1. **Sandbox AWS account** — separate from anything real.
-2. **VPC with two subnets in different AZs** and a **security group** that permits
-   inbound `80/tcp` from wherever you'll test (the ALB SG is fine).
-3. **An empty Application Load Balancer + HTTP listener** in that VPC. The e2e run
-   creates its own target groups and listener rules against it.
-4. **Two additional target groups** (blue + green) for the blue/green + canary tests.
-   Both `TargetType: ip`, protocol HTTP, port 80.
-5. **An IAM role** ECS can assume as `taskExecutionRoleArn` (managed policy
-   `AmazonECSTaskExecutionRolePolicy`) — or reuse `ecsTaskExecutionRole` if it
-   already exists.
-6. **An EFS filesystem** with a mount target in each subnet (for `03-efs-firelens`).
-   Optional: an EFS access point.
-7. **A CloudWatch alarm** (any alarm, even one that never fires) for the blue/green
-   test to reference. Metric doesn't matter.
-8. **A Lambda function** ECS can invoke for the canary lifecycle hook. The
-   function body can literally be:
-   ```python
-   def handler(event, context):
-       return {"hookStatus": "SUCCEEDED"}
-   ```
-9. **A running Andro-CD instance** (`docker compose up` from repo root works fine).
+1. **Sandbox AWS account** — separate from anything real. Never point this at
+   production; `bootstrap.sh` creates and `teardown.sh` deletes IAM roles,
+   an ALB, target groups, EFS, etc.
+2. **AWS CLI + `jq`** installed locally. `yq` is recommended (used by preflight).
+3. **A running Andro-CD instance** — `docker compose up` from repo root works.
+4. **IAM permissions for the CLI user** — attach [`iam-policy.json`](iam-policy.json)
+   (covers both bootstrap/teardown and the reconciler itself).
 
-## Setup
+## Setup (one command)
 
 ```bash
-# 1. Fill in the ARNs / IDs from your sandbox
 cd examples/e2e
-cp values.yaml values.local.yaml    # values.local.* is gitignored
-$EDITOR values.local.yaml           # every ${key} in the manifests reads from here
 
-# 2. Verify AWS credentials work and every values.yaml key is set
+# 1. Auto-provision every AWS resource + write values.local.yaml
+./scripts/bootstrap.sh
+# → prompts once, then creates/discovers VPC, subnets, SG, ALB, target groups,
+#   EFS + access point, IAM roles, CloudWatch alarm, Lambda hook, Cloud Map
+#   namespace, ECS cluster. Skips anything that already exists.
+# → estimated cost while running: ~$18/month if left up (ALB is the big cost).
+
+# 2. Sanity-check
 ./scripts/preflight.sh
 
 # 3. Push manifests to a Git repo Andro-CD is polling
-#    (or the repo you already registered — the manifests use unique names)
+#    (the manifests use ${key} substitution from values.local.yaml at parse time
+#    on Andro-CD's side — you commit the manifests as-is)
 
-# 4. Run the checklist
-./scripts/run.sh                    # applies + waits + asserts, per scenario
+# 4. Drive the assertions
+./scripts/run.sh
 ```
+
+## Iterating
+
+Re-running `run.sh` is safe — services get updated rather than recreated. When
+you're temporarily done for the night, run `cleanup.sh` to drop the ECS
+services and stop paying for tasks (the ALB stays up, ~$16/mo). When you're
+completely done with the e2e suite, run `teardown.sh` to remove everything
+`bootstrap.sh` created.
 
 ## What each step verifies
 

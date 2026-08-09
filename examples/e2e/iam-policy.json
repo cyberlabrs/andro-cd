@@ -111,6 +111,41 @@
         "servicediscovery:GetNamespace"
       ],
       "Resource": "*"
+    },
+    {
+      "Sid": "BootstrapAndTeardownOnly",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateVpc", "ec2:DeleteVpc", "ec2:ModifyVpcAttribute",
+        "ec2:CreateSubnet", "ec2:DeleteSubnet", "ec2:ModifySubnetAttribute",
+        "ec2:CreateInternetGateway", "ec2:AttachInternetGateway",
+        "ec2:DetachInternetGateway", "ec2:DeleteInternetGateway",
+        "ec2:CreateRoute", "ec2:DescribeRouteTables",
+        "ec2:DescribeAvailabilityZones", "ec2:CreateTags",
+        "ec2:CreateSecurityGroup", "ec2:DeleteSecurityGroup",
+        "ec2:AuthorizeSecurityGroupIngress",
+        "elasticloadbalancing:CreateLoadBalancer",
+        "elasticloadbalancing:DeleteLoadBalancer",
+        "elasticloadbalancing:CreateListener",
+        "elasticloadbalancing:DeleteListener",
+        "elasticloadbalancing:AddTags",
+        "iam:CreateRole", "iam:DeleteRole",
+        "iam:AttachRolePolicy", "iam:DetachRolePolicy",
+        "iam:PutRolePolicy", "iam:DeleteRolePolicy",
+        "iam:ListAttachedRolePolicies", "iam:ListRolePolicies",
+        "iam:GetRole", "iam:TagRole",
+        "lambda:CreateFunction", "lambda:DeleteFunction",
+        "lambda:GetFunction", "lambda:TagResource",
+        "efs:CreateFileSystem", "efs:DeleteFileSystem", "efs:DescribeFileSystems",
+        "efs:CreateMountTarget", "efs:DeleteMountTarget", "efs:DescribeMountTargets",
+        "efs:CreateAccessPoint", "efs:DeleteAccessPoint", "efs:DescribeAccessPoints",
+        "efs:TagResource",
+        "cloudwatch:PutMetricAlarm", "cloudwatch:DeleteAlarms",
+        "servicediscovery:CreatePrivateDnsNamespace",
+        "servicediscovery:DeleteNamespace",
+        "servicediscovery:GetOperation"
+      ],
+      "Resource": "*"
     }
   ]
 }

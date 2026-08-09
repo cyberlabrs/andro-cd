@@ -227,6 +227,11 @@ the deploymentStrategy block plus `id`, `createdAt`, `rolloutStateReason` per de
   mocked AWS: rolling, EFS, FireLens, Service Connect, blue/green with
   `deploymentController=ECS`, canary, autoscaling, capacity providers, task-def
   update triggering service update). A companion **sandbox kit** at
-  `examples/e2e/` ships an IAM policy, per-scenario manifests, and
-  `preflight.sh` + `run.sh` + `cleanup.sh` for exercising the same scenarios
-  against a real AWS account.
+  `examples/e2e/` ships an IAM policy, per-scenario manifests, `preflight.sh` +
+  `run.sh` + `cleanup.sh`, and — most importantly — a one-shot
+  **`bootstrap.sh`** that auto-discovers or creates every AWS resource the
+  suite needs (VPC/subnets/SG, ALB + listener, blue/green target groups, EFS +
+  access point, IAM roles, CloudWatch alarm, Lambda hook, Cloud Map namespace,
+  ECS cluster) and writes `values.local.yaml` from what it produced. A
+  matching **`teardown.sh`** removes only tag-guarded (`androcd-e2e=true`)
+  resources so it's safe on any shared account.
