@@ -17,11 +17,13 @@ TAG_KEY="androcd-e2e"
 TAG_VAL="true"
 CLUSTER_NAME="androcd-e2e"
 
-red()    { printf '\033[31m%s\033[0m\n' "$*"; }
-green()  { printf '\033[32m%s\033[0m\n' "$*"; }
-yellow() { printf '\033[33m%s\033[0m\n' "$*"; }
-bold()   { printf '\033[1m%s\033[0m\n' "$*"; }
-dim()    { printf '\033[2m%s\033[0m\n' "$*"; }
+# All log helpers write to STDERR so callers that capture stdout (e.g. `x=$(fn)`)
+# don't accidentally slurp log lines into the return value.
+red()    { printf '\033[31m%s\033[0m\n' "$*" >&2; }
+green()  { printf '\033[32m%s\033[0m\n' "$*" >&2; }
+yellow() { printf '\033[33m%s\033[0m\n' "$*" >&2; }
+bold()   { printf '\033[1m%s\033[0m\n' "$*" >&2; }
+dim()    { printf '\033[2m%s\033[0m\n' "$*" >&2; }
 
 for tool in aws jq; do
   command -v "$tool" >/dev/null || { red "$tool is required"; exit 1; }
@@ -70,12 +72,12 @@ aws_sd()   { aws servicediscovery --region "$REGION" "$@"; }
 wait_for() {
   # $1 human label, $2 command that exits 0 when ready, $3 max seconds (default 60)
   local label="$1" cmd="$2" limit="${3:-60}" waited=0
-  printf "  waiting for %s..." "$label"
+  printf "  waiting for %s..." "$label" >&2
   while ! eval "$cmd" >/dev/null 2>&1; do
-    [ "$waited" -ge "$limit" ] && { echo; red "  timeout on $label"; return 1; }
-    sleep 3; waited=$((waited+3)); printf "."
+    [ "$waited" -ge "$limit" ] && { echo >&2; red "  timeout on $label"; return 1; }
+    sleep 3; waited=$((waited+3)); printf "." >&2
   done
-  echo " ready"
+  echo " ready" >&2
 }
 
 # ---- 1) VPC + subnets + IGW/routing --------------------------------------------

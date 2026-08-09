@@ -12,10 +12,11 @@ REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-1}}"
 TAG_KEY="androcd-e2e"
 TAG_VAL="true"
 
-red()    { printf '\033[31m%s\033[0m\n' "$*"; }
-green()  { printf '\033[32m%s\033[0m\n' "$*"; }
-yellow() { printf '\033[33m%s\033[0m\n' "$*"; }
-bold()   { printf '\033[1m%s\033[0m\n' "$*"; }
+# Log helpers go to STDERR — matches bootstrap.sh for consistency.
+red()    { printf '\033[31m%s\033[0m\n' "$*" >&2; }
+green()  { printf '\033[32m%s\033[0m\n' "$*" >&2; }
+yellow() { printf '\033[33m%s\033[0m\n' "$*" >&2; }
+bold()   { printf '\033[1m%s\033[0m\n' "$*" >&2; }
 
 aws_ec2()  { aws ec2 --region "$REGION" "$@"; }
 aws_elb()  { aws elbv2 --region "$REGION" "$@"; }
