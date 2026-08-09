@@ -112,7 +112,11 @@ else
 fi
 
 # Subnets — pick two in different AZs. Create them in the test VPC if needed.
-mapfile -t SUBNETS < <(aws_ec2 describe-subnets --filters "Name=vpc-id,Values=$VPC_ID" \
+# Portable (bash 3.2 on macOS has no mapfile).
+SUBNETS=()
+while IFS= read -r line; do
+  [ -n "$line" ] && SUBNETS+=("$line")
+done < <(aws_ec2 describe-subnets --filters "Name=vpc-id,Values=$VPC_ID" \
   --query 'Subnets[?MapPublicIpOnLaunch==`true` || Tags[?Key==`'$TAG_KEY'`]].[SubnetId,AvailabilityZone]' \
   --output text | sort -k2 | awk '{print $1}')
 

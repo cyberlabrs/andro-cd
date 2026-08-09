@@ -52,10 +52,12 @@ if [ -n "$alb_arn" ] && [ "$alb_arn" != "None" ]; then
   listener=$(aws_elb describe-listeners --load-balancer-arn "$alb_arn" \
     --query 'Listeners[0].ListenerArn' --output text 2>/dev/null || echo "")
   if [ -n "$listener" ] && [ "$listener" != "None" ]; then
-    mapfile -t rules < <(aws_elb describe-rules --listener-arn "$listener" \
+    rules=()
+    while IFS= read -r r; do
+      [ -n "$r" ] && rules+=("$r")
+    done < <(aws_elb describe-rules --listener-arn "$listener" \
       --query "Rules[?!IsDefault].RuleArn" --output text 2>/dev/null | tr '\t' '\n')
     for rule in "${rules[@]}"; do
-      [ -z "$rule" ] && continue
       aws_elb delete-rule --rule-arn "$rule" >/dev/null 2>&1 && green "  ✓ deleted rule $rule" || true
     done
   fi
