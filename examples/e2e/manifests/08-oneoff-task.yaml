@@ -1,0 +1,26 @@
+apiVersion: andro-cd/v1
+kind: ECSTask
+metadata:
+  name: e2e-08-oneoff
+  labels: {suite: e2e, scenario: oneoff}
+spec:
+  cluster: ${cluster}
+  region: ${region}
+  runPolicy:
+    runOnSync: false     # test the manual "Run now" flow instead
+    count: 1
+  network:
+    subnets: [${subnet_a}, ${subnet_b}]
+    securityGroups: [${security_group}]
+  service:
+    launchType: FARGATE
+    assignPublicIp: true
+  taskDefinition:
+    cpu: "256"
+    memory: "512"
+    executionRoleArn: ${execution_role}
+    containers:
+      - name: job
+        image: public.ecr.aws/amazonlinux/amazonlinux:2023
+        command: ["/bin/sh", "-c", "echo one-off job && sleep 5 && echo done"]
+        logGroup: /ecs/e2e-08-oneoff

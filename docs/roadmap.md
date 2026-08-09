@@ -32,6 +32,10 @@ The full, continuously updated list lives in
   synchronized scrolling, hide-unchanged fold, +N/−N stats), **deployment strategy
   panel** on the Overview tab (colored badge, live bake-time countdown, canary/linear
   sizing, rollback alarms, lifecycle-hook list)
+- Testing: **`moto`-backed e2e suite** exercising apply + diff round-trip against
+  a mocked AWS (`backend/tests/test_e2e_moto.py`); **sandbox kit** at
+  `examples/e2e/` (IAM policy, per-scenario manifests, run/cleanup scripts) for
+  real-AWS smoke runs
 
 ## Next up
 
@@ -41,9 +45,9 @@ The full, continuously updated list lives in
 3. **AWS rate-limit handling** — botocore adaptive retry mode, jitter between apps.
 4. **CLI expansion** — `androcd diff`, `androcd sync <app>`, `androcd logs <app>`
    hitting the API from CI.
-5. **End-to-end smoke tests against real AWS** — walk a demo manifest through each
-   new feature (blue/green, canary, EFS, FireLens, Service Connect) to catch
-   shape mismatches unit tests can't.
+5. **UI-driven incident pause** — global freeze switch + per-app Pause button in
+   the header, persisted and audited. Today the workaround is a manifest edit
+   (`syncPolicy.autoSync: false`), which is too slow for real incidents.
 
 ## Contributing
 

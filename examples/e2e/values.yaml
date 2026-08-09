@@ -1,0 +1,38 @@
+# values file consumed by every manifest in examples/e2e/manifests/ via Andro-CD's
+# `${key}` substitution. Copy to values.local.yaml (gitignored) and fill in with your
+# sandbox ARNs / IDs. Do NOT commit real ARNs to the repo.
+
+cluster: androcd-e2e                    # will be auto-created by Andro-CD
+region: us-east-1
+
+# --- VPC / networking ---
+subnet_a: subnet-REPLACE_ME_A
+subnet_b: subnet-REPLACE_ME_B
+security_group: sg-REPLACE_ME
+
+# --- Load balancer (must already exist in the sandbox) ---
+alb_listener: arn:aws:elasticloadbalancing:us-east-1:ACCOUNT:listener/app/YOUR-ALB/xxx/yyy
+blue_tg: arn:aws:elasticloadbalancing:us-east-1:ACCOUNT:targetgroup/e2e-blue/xxx
+green_tg: arn:aws:elasticloadbalancing:us-east-1:ACCOUNT:targetgroup/e2e-green/xxx
+production_rule: arn:aws:elasticloadbalancing:us-east-1:ACCOUNT:listener-rule/app/YOUR-ALB/xxx/yyy/prod
+test_rule: arn:aws:elasticloadbalancing:us-east-1:ACCOUNT:listener-rule/app/YOUR-ALB/xxx/yyy/test
+
+# --- IAM roles ---
+execution_role: arn:aws:iam::ACCOUNT:role/ecsTaskExecutionRole
+task_role: arn:aws:iam::ACCOUNT:role/ecsTaskExecutionRole
+scheduler_role: arn:aws:iam::ACCOUNT:role/androcdSchedulerRole
+elb_bg_role: arn:aws:iam::ACCOUNT:role/ELBBlueGreenRole
+hook_role: arn:aws:iam::ACCOUNT:role/EcsHookInvokerRole
+
+# --- EFS (03-efs-firelens) ---
+efs_id: fs-REPLACE_ME
+efs_access_point: fsap-REPLACE_ME       # or leave blank if you don't use APs
+
+# --- CloudWatch alarm (05-blue-green rollback trigger) ---
+rollback_alarm: androcd-e2e-5xx
+
+# --- Lambda function for canary lifecycle hook (06-canary) ---
+canary_hook_lambda: arn:aws:lambda:us-east-1:ACCOUNT:function:androcd-e2e-canary-hook
+
+# --- Service Connect (04) — the cluster's Cloud Map namespace ---
+sc_namespace: androcd-e2e.local

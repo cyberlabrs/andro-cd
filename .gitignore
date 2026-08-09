@@ -10,3 +10,7 @@ frontend/dist/
 
 # mkdocs build output
 site/
+
+# e2e test values.local.* — real ARNs, never commit
+examples/e2e/values.local.*
+

@@ -1,0 +1,30 @@
+apiVersion: andro-cd/v1
+kind: ECSService
+metadata:
+  name: e2e-02-autoscaling
+  labels: {suite: e2e, scenario: autoscaling}
+spec:
+  cluster: ${cluster}
+  region: ${region}
+  network:
+    subnets: [${subnet_a}, ${subnet_b}]
+    securityGroups: [${security_group}]
+  service:
+    assignPublicIp: true
+    loadBalancer:
+      containerPort: 80
+      targetGroupArn: ${blue_tg}
+    autoscaling:
+      minCount: 1
+      maxCount: 4
+      targetCpu: 60
+      targetRequestsPerTarget: 200
+  taskDefinition:
+    cpu: "256"
+    memory: "512"
+    executionRoleArn: ${execution_role}
+    containers:
+      - name: web
+        image: nginx:1.27
+        portMappings: [80]
+        logGroup: /ecs/e2e-02-autoscaling

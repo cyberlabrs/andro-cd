@@ -185,6 +185,41 @@ doesn't define one.
 `KEEP_TASKDEF_REVISIONS=N` deregisters ACTIVE revisions beyond the newest N after each
 successful sync. The in-use revision is never touched; `0` (default) keeps everything.
 
+## End-to-end sandbox testing
+
+`examples/e2e/` ships a self-contained kit that walks Andro-CD through every 2026
+feature on a real (sandbox) AWS account:
+
+- `iam-policy.json` — least-privilege policy for the CI user.
+- `values.yaml` — one place to fill in your VPC / subnet / SG / TG / role ARNs
+  (copy to `values.local.yaml`, which is gitignored).
+- `manifests/01..08-*.yaml` — one manifest per scenario: rolling, autoscaling,
+  EFS + FireLens, Service Connect, blue/green, canary, scheduled task, one-off task.
+- `scripts/preflight.sh` — verifies AWS credentials, tool availability, and that
+  the values file has no placeholder values.
+- `scripts/run.sh` — for each manifest: triggers a sync, waits for Synced+Healthy,
+  then hits AWS directly to assert the scenario-specific outcome (deployment
+  strategy, scaling policies, Service Connect state, EFS mounts, etc.).
+- `scripts/cleanup.sh` — deletes every AWS resource the run creates.
+
+Typical loop:
+
+```bash
+cd examples/e2e
+cp values.yaml values.local.yaml && $EDITOR values.local.yaml
+./scripts/preflight.sh                  # green check → ready
+./scripts/run.sh                        # applies + waits + asserts, per scenario
+./scripts/cleanup.sh                    # tears everything down
+```
+
+See `examples/e2e/README.md` for the pre-existing infra checklist (VPC, ALB, EFS,
+alarms, Lambda) — the runner does not create these; it drives Andro-CD against
+resources you already own in a sandbox account.
+
+The same shape assertions run in-process against `moto`-mocked AWS as part of
+`pytest` (`backend/tests/test_e2e_moto.py`); the sandbox kit is the "does it hold up
+against real AWS" pass on top.
+
 ## Multi-account (AWS profiles)
 
 Add named profiles in **AWS Profiles** (validated via STS, stored encrypted with

@@ -1,0 +1,24 @@
+apiVersion: andro-cd/v1
+kind: ECSScheduledTask
+metadata:
+  name: e2e-07-scheduled
+  labels: {suite: e2e, scenario: scheduled}
+spec:
+  cluster: ${cluster}
+  region: ${region}
+  schedule:
+    expression: rate(1 day)
+    roleArn: ${scheduler_role}
+    enabled: true
+  network:
+    subnets: [${subnet_a}, ${subnet_b}]
+    securityGroups: [${security_group}]
+  taskDefinition:
+    cpu: "256"
+    memory: "512"
+    executionRoleArn: ${execution_role}
+    containers:
+      - name: cron
+        image: public.ecr.aws/amazonlinux/amazonlinux:2023
+        command: ["/bin/sh", "-c", "echo scheduled tick && date"]
+        logGroup: /ecs/e2e-07-scheduled

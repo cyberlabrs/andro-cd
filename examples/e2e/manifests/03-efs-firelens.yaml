@@ -1,0 +1,54 @@
+apiVersion: andro-cd/v1
+kind: ECSService
+metadata:
+  name: e2e-03-efs-firelens
+  labels: {suite: e2e, scenario: efs-firelens}
+spec:
+  cluster: ${cluster}
+  region: ${region}
+  network:
+    subnets: [${subnet_a}, ${subnet_b}]
+    securityGroups: [${security_group}]
+  service:
+    desiredCount: 1
+    assignPublicIp: true
+  taskDefinition:
+    cpu: "512"
+    memory: "1024"
+    executionRoleArn: ${execution_role}
+    taskRoleArn: ${task_role}
+    containers:
+      - name: web
+        image: nginx:1.27
+        portMappings: [80]
+        mountPoints:
+          - sourceVolume: data
+            containerPath: /var/data
+            readOnly: false
+        logConfiguration:
+          logDriver: awsfirelens
+          options:
+            Name: cloudwatch
+            region: ${region}
+            log_group_name: /ecs/e2e-03-efs-firelens
+            log_stream_prefix: web-
+            auto_create_group: "true"
+        dependsOn:
+          - containerName: log-router
+            condition: START
+      - name: log-router
+        image: amazon/aws-for-fluent-bit:latest
+        essential: false
+        firelensConfiguration:
+          type: fluentbit
+          options:
+            enable-ecs-log-metadata: "true"
+    volumes:
+      - name: data
+        efs:
+          fileSystemId: ${efs_id}
+          rootDirectory: /
+          transitEncryption: true
+          authorizationConfig:
+            accessPointId: ${efs_access_point}
+            iam: true

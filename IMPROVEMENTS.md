@@ -215,6 +215,18 @@ the deploymentStrategy block plus `id`, `createdAt`, `rolloutStateReason` per de
 3. **AWS rate limit handling** — botocore adaptive retry mode, jitter between apps.
 4. **CLI expansion** — `androcd diff`, `androcd sync <app>`, `androcd logs <app>`
    hitting the API from CI.
-5. **End-to-end smoke suite against real AWS** — walk a demo manifest through each
-   new feature (blue/green, canary, EFS, FireLens, Service Connect) with `moto`/
-   `Stubber` to catch shape mismatches unit tests can't.
+5. **UI-driven incident pause** — global "freeze all syncs" switch + per-app Pause
+   button (see the incident-mode question from users). Today the workaround is
+   `syncPolicy.autoSync: false` per app, but that requires a Git edit — not what
+   you want at 3am. Would persist to DB, surface as a red banner, and be audited.
+
+## Just landed
+
+- **End-to-end smoke suite** — `moto`-based tests in `backend/tests/test_e2e_moto.py`
+  (9 scenarios, exercises the real `apply` + `compute_diff` pipeline against a
+  mocked AWS: rolling, EFS, FireLens, Service Connect, blue/green with
+  `deploymentController=ECS`, canary, autoscaling, capacity providers, task-def
+  update triggering service update). A companion **sandbox kit** at
+  `examples/e2e/` ships an IAM policy, per-scenario manifests, and
+  `preflight.sh` + `run.sh` + `cleanup.sh` for exercising the same scenarios
+  against a real AWS account.

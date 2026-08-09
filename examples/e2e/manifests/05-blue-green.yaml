@@ -1,0 +1,37 @@
+apiVersion: andro-cd/v1
+kind: ECSService
+metadata:
+  name: e2e-05-blue-green
+  labels: {suite: e2e, scenario: blue-green}
+spec:
+  cluster: ${cluster}
+  region: ${region}
+  network:
+    subnets: [${subnet_a}, ${subnet_b}]
+    securityGroups: [${security_group}]
+  service:
+    desiredCount: 2
+    assignPublicIp: true
+    loadBalancer:
+      containerName: web
+      containerPort: 80
+      targetGroupArn: ${blue_tg}
+      alternateTargetGroupArn: ${green_tg}
+      productionListenerRule: ${production_rule}
+      roleArn: ${elb_bg_role}
+    deploymentStrategy:
+      type: BLUE_GREEN
+      bakeTimeMinutes: 3
+      alarms:
+        alarmNames: [${rollback_alarm}]
+        rollback: true
+        enable: true
+  taskDefinition:
+    cpu: "256"
+    memory: "512"
+    executionRoleArn: ${execution_role}
+    containers:
+      - name: web
+        image: nginx:1.27
+        portMappings: [80]
+        logGroup: /ecs/e2e-05-blue-green
