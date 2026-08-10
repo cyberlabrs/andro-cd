@@ -805,7 +805,8 @@ def _norm_container(c: dict) -> dict:
             key=lambda s: s["name"],
         ),
         "portMappings": sorted(
-            [{"containerPort": p["containerPort"], "protocol": p.get("protocol", "tcp")}
+            [{"containerPort": p["containerPort"], "protocol": p.get("protocol", "tcp"),
+              "name": p.get("name") or None, "appProtocol": p.get("appProtocol") or None}
              for p in c.get("portMappings", [])],
             key=lambda p: p["containerPort"],
         ),

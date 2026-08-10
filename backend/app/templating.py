@@ -29,7 +29,11 @@ def flatten(values: dict, prefix: str = "") -> dict[str, object]:
 
 
 def substitute(node, values: dict):
-    """Recursively replace ${key} placeholders in strings."""
+    """Recursively replace ${key} placeholders in a parsed YAML document.
+    Prefer `substitute_text` when the input is still raw YAML — running the
+    substitution before YAML parsing lets ${key} appear in places YAML would
+    otherwise reject (e.g. flow sequences `[${a}, ${b}]`, where `{` looks like
+    a flow-map opening to the YAML lexer)."""
     if isinstance(node, str):
         for k, v in values.items():
             node = node.replace("${" + k + "}", str(v))
@@ -39,6 +43,18 @@ def substitute(node, values: dict):
     if isinstance(node, list):
         return [substitute(v, values) for v in node]
     return node
+
+
+def substitute_text(text: str, values: dict) -> str:
+    """Replace ${key} in raw YAML text before parsing.
+
+    This is the recommended substitution point — YAML rejects `${key}` inside
+    flow sequences (`[${a}, ${b}]`) because `{` opens a flow mapping. Running
+    substitution on the text sidesteps that entirely.
+    """
+    for k, v in values.items():
+        text = text.replace("${" + k + "}", str(v))
+    return text
 
 
 def values_for(rel_path: str, values_by_dir: dict[str, dict]) -> dict[str, object]:

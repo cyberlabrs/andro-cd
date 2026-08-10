@@ -182,16 +182,23 @@ def load_manifest_docs(repo: dict) -> list[tuple[str, dict]]:
         except yaml.YAMLError as e:
             log.error("invalid values file %s: %s", rel, e)
 
-    # Pass 2: parse manifests, applying layered ${key} substitution.
+    # Pass 2: parse manifests, applying layered ${key} substitution ON THE RAW TEXT
+    # before yaml.safe_load runs. This is important: YAML rejects `${key}` inside
+    # flow sequences (`subnets: [${a}, ${b}]`) because `{` looks like a flow-map
+    # opening. Substituting on the text sidesteps that entirely — the parser only
+    # ever sees fully-resolved values.
     docs: list[tuple[str, dict]] = []
     for file_path in manifest_files:
         rel = os.path.relpath(file_path, directory).replace(os.sep, "/")
         values = templating.values_for(rel, values_by_dir) if values_by_dir else {}
         try:
             with open(file_path) as f:
-                for doc in yaml.safe_load_all(f):
-                    if isinstance(doc, dict) and doc:
-                        docs.append((rel, templating.substitute(doc, values) if values else doc))
+                text = f.read()
+            if values:
+                text = templating.substitute_text(text, values)
+            for doc in yaml.safe_load_all(text):
+                if isinstance(doc, dict) and doc:
+                    docs.append((rel, doc))
         except yaml.YAMLError as e:
             log.error("invalid YAML in %s: %s", rel, e)
             docs.append((rel, {"__parse_error__": str(e)}))

@@ -6,6 +6,12 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 class PortMapping(BaseModel):
     containerPort: int
     protocol: str = "tcp"
+    # Optional AWS ECS "port name" — required when this port is referenced by
+    # `service.serviceConnect.services[].portName`. Without it Service Connect
+    # rejects the CreateService call with:
+    #   "portName(...) does not refer to any named PortMapping in the container definitions"
+    name: Optional[str] = None
+    appProtocol: Optional[str] = None    # http | http2 | grpc — needed for Service Connect L7
 
 
 class HealthCheckSpec(BaseModel):
@@ -78,7 +84,12 @@ class ContainerSpec(BaseModel):
             if isinstance(p, int):
                 ports.append({"containerPort": p, "protocol": "tcp"})
             else:
-                ports.append({"containerPort": p.containerPort, "protocol": p.protocol})
+                entry: dict[str, Any] = {"containerPort": p.containerPort, "protocol": p.protocol}
+                if p.name:
+                    entry["name"] = p.name
+                if p.appProtocol:
+                    entry["appProtocol"] = p.appProtocol
+                ports.append(entry)
         return sorted(ports, key=lambda p: p["containerPort"])
 
 
