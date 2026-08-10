@@ -5,6 +5,22 @@ All notable changes are documented here. The format follows
 [Semantic Versioning](https://semver.org/). Entries are generated automatically by
 [release-please](https://github.com/googleapis/release-please).
 
+## [0.8.0](https://github.com/cyberlabrs/andro-cd/compare/v0.7.0...v0.8.0) (2026-08-10)
+
+
+### Features
+
+* **e2e:** bootstrap + teardown scripts for zero-config sandbox setup ([214f39d](https://github.com/cyberlabrs/andro-cd/commit/214f39d0c91d2d4eeebb01681fa95cdb5f23571d))
+* surface DB persistence status + safe delete for stale orphans ([9a3984d](https://github.com/cyberlabrs/andro-cd/commit/9a3984d10ddcdead27baf63a0f7e792af8467724))
+
+
+### Bug Fixes
+
+* **e2e:** kit shakedown — bash 3.2 compat, IAM trust, run.sh auth, block-list manifests ([ea53ed7](https://github.com/cyberlabrs/andro-cd/commit/ea53ed7e7b26586db747d1a7193edfd2efa7a04b))
+* **e2e:** replace mapfile with while-read for macOS bash 3.2 compat ([b760ea6](https://github.com/cyberlabrs/andro-cd/commit/b760ea6080ec7e646bb5c33c552ca960adea9615))
+* **e2e:** send bootstrap log helpers to stderr so ARN captures aren't polluted ([7a7a850](https://github.com/cyberlabrs/andro-cd/commit/7a7a850932e40b7e3a150bad2b808afd87d51412))
+* templating on raw YAML text + PortMapping.name/appProtocol pass-through ([b438981](https://github.com/cyberlabrs/andro-cd/commit/b4389815a9ac7ffd9dd7102311d4a527197da9e7))
+
 ## [0.7.0](https://github.com/cyberlabrs/andro-cd/compare/v0.6.0...v0.7.0) (2026-08-08)
 
 
