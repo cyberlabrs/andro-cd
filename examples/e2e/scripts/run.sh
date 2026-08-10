@@ -10,8 +10,24 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VALUES="${VALUES_FILE:-$HERE/values.local.yaml}"
 ANDROCD_URL="${ANDROCD_URL:-http://localhost:8080}"
-API_TOKEN="${API_TOKEN:-}"                # if AUTH_MODE!=none, set an API token
 TIMEOUT="${TIMEOUT:-600}"                 # seconds to wait for each app to settle
+
+# Auth token precedence: $API_TOKEN env var > first token from repo-root .env
+# API_TOKENS. Users often forget to `export API_TOKEN=...` — falling back to .env
+# means "if you set it up for the andro-cd container to use, run.sh sees it too".
+API_TOKEN="${API_TOKEN:-}"
+if [ -z "$API_TOKEN" ]; then
+  DOTENV="${HERE}/../../.env"   # repo root
+  if [ -f "$DOTENV" ] && grep -q '^API_TOKENS=' "$DOTENV" 2>/dev/null; then
+    # API_TOKENS format: token:role,token2:role2 — take the first token
+    API_TOKEN=$(grep '^API_TOKENS=' "$DOTENV" | head -1 | cut -d= -f2- \
+      | cut -d, -f1 | cut -d: -f1)
+    [ -n "$API_TOKEN" ] && printf '\033[33m! using API_TOKEN from %s\033[0m\n' "$DOTENV" >&2
+  fi
+fi
+if [ -z "$API_TOKEN" ]; then
+  printf '\033[33m! no API_TOKEN set — requests will only work if AUTH_MODE=none\033[0m\n' >&2
+fi
 
 red()   { printf '\033[31m%s\033[0m\n' "$*"; }
 green() { printf '\033[32m%s\033[0m\n' "$*"; }
@@ -76,11 +92,12 @@ scenario() {
 }
 
 check() {  # $1 label, then a command; the command must exit 0 on pass
+  local label="$1"; shift
   if "$@" >/tmp/e2e-check.out 2>&1; then
-    green "  ✓ $1"
+    green "  ✓ $label"
     pass=$((pass+1))
   else
-    red "  ✗ $1"
+    red "  ✗ $label"
     yellow "    output:"; sed 's/^/    /' /tmp/e2e-check.out
   fi
 }

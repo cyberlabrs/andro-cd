@@ -10,8 +10,11 @@ spec:
     runOnSync: false     # test the manual "Run now" flow instead
     count: 1
   network:
-    subnets: [${subnet_a}, ${subnet_b}]
-    securityGroups: [${security_group}]
+    subnets:
+      - ${subnet_a}
+      - ${subnet_b}
+    securityGroups:
+      - ${security_group}
   service:
     launchType: FARGATE
     assignPublicIp: true

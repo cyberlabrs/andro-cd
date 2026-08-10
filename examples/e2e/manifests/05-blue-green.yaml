@@ -7,8 +7,11 @@ spec:
   cluster: ${cluster}
   region: ${region}
   network:
-    subnets: [${subnet_a}, ${subnet_b}]
-    securityGroups: [${security_group}]
+    subnets:
+      - ${subnet_a}
+      - ${subnet_b}
+    securityGroups:
+      - ${security_group}
   service:
     desiredCount: 2
     assignPublicIp: true
@@ -23,7 +26,8 @@ spec:
       type: BLUE_GREEN
       bakeTimeMinutes: 3
       alarms:
-        alarmNames: [${rollback_alarm}]
+        alarmNames:
+          - ${rollback_alarm}
         rollback: true
         enable: true
   taskDefinition:

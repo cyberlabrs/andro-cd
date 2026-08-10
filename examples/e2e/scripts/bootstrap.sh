@@ -123,7 +123,7 @@ done < <(aws_ec2 describe-subnets --filters "Name=vpc-id,Values=$VPC_ID" \
   --output text | sort -k2 | awk '{print $1}')
 
 if [ "${#SUBNETS[@]}" -lt 2 ]; then
-  echo "  creating 2 test subnets in $VPC_ID"
+  echo "  creating 2 test subnets in $VPC_ID" >&2
   AZ_A=$(aws_ec2 describe-availability-zones --query 'AvailabilityZones[0].ZoneName' --output text)
   AZ_B=$(aws_ec2 describe-availability-zones --query 'AvailabilityZones[1].ZoneName' --output text)
   SUB_A=$(aws_ec2 create-subnet --vpc-id "$VPC_ID" --cidr-block 10.99.1.0/24 \
@@ -191,7 +191,21 @@ EOF
 
 ensure_role ecsTaskExecutionRole ecs-tasks.amazonaws.com \
   arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
-ensure_role ELBBlueGreenRole elasticloadbalancing.amazonaws.com
+# NOTE: ELB blue/green role is ASSUMED BY ECS, not by ELB itself. ECS then uses
+# it to modify the listener/target-group state. Trust must be ecs.amazonaws.com,
+# not elasticloadbalancing.amazonaws.com, or CreateService rejects with
+# "Unable to assume role and validate the specified targetGroupArn".
+ensure_role ELBBlueGreenRole ecs.amazonaws.com
+aws_iam put-role-policy --role-name ELBBlueGreenRole --policy-name ManageELBForBG \
+  --policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":[
+    "elasticloadbalancing:DescribeListeners",
+    "elasticloadbalancing:DescribeRules",
+    "elasticloadbalancing:DescribeTargetGroups",
+    "elasticloadbalancing:ModifyListener",
+    "elasticloadbalancing:ModifyRule",
+    "elasticloadbalancing:RegisterTargets",
+    "elasticloadbalancing:DeregisterTargets"
+  ],"Resource":"*"}]}' >/dev/null
 ensure_role EcsHookInvokerRole ecs.amazonaws.com
 ensure_role androcdSchedulerRole scheduler.amazonaws.com
 
@@ -251,6 +265,12 @@ ensure_tg() {
 }
 BLUE_TG=$(ensure_tg androcd-e2e-blue)
 GREEN_TG=$(ensure_tg androcd-e2e-green)
+if [ -z "$BLUE_TG" ] || [ -z "$GREEN_TG" ] \
+   || [ "$BLUE_TG" = "None" ] || [ "$GREEN_TG" = "None" ]; then
+  red "  ✗ failed to create/find target groups — aborting"
+  red "    BLUE_TG=$BLUE_TG  GREEN_TG=$GREEN_TG"
+  exit 1
+fi
 
 # ---- 6) Listener + production/test rules ---------------------------------------
 LISTENER_ARN=$(aws_elb describe-listeners --load-balancer-arn "$ALB_ARN" \
@@ -275,14 +295,22 @@ ensure_rule() {
   if [ -n "$existing" ] && [ "$existing" != "None" ]; then
     echo "$existing"; return
   fi
+  # NOTE: --tags takes SPACE-separated Key=...,Value=... items, not comma-joined
+  # (comma inside a single item is fine; comma between items reuses "Key=" and errors).
   aws_elb create-rule --listener-arn "$LISTENER_ARN" --priority "$prio" \
     --conditions "Field=path-pattern,Values=$path" \
     --actions "Type=forward,TargetGroupArn=$BLUE_TG" \
-    --tags "Key=$TAG_KEY,Value=$TAG_VAL,Key=role,Value=$tag" \
+    --tags "Key=$TAG_KEY,Value=$TAG_VAL" "Key=role,Value=$tag" \
     --query 'Rules[0].RuleArn' --output text
 }
 PROD_RULE=$(ensure_rule 100 "/prod/*" prod)
 TEST_RULE=$(ensure_rule 200 "/test/*" test)
+if [ -z "$PROD_RULE" ] || [ -z "$TEST_RULE" ] \
+   || [ "$PROD_RULE" = "None" ] || [ "$TEST_RULE" = "None" ]; then
+  red "  ✗ failed to create/find listener rules — aborting"
+  red "    PROD_RULE=$PROD_RULE  TEST_RULE=$TEST_RULE"
+  exit 1
+fi
 green "  ✓ production + test rules ready"
 
 # ---- 7) EFS + access point -----------------------------------------------------
@@ -384,7 +412,7 @@ SC_NS="androcd-e2e.local"
 NS_ID=$(aws_sd list-namespaces \
   --query "Namespaces[?Name=='$SC_NS'].Id | [0]" --output text 2>/dev/null || echo "")
 if [ -z "$NS_ID" ] || [ "$NS_ID" = "None" ]; then
-  echo "  creating Cloud Map namespace '$SC_NS' (async, ~30s)..."
+  echo "  creating Cloud Map namespace '$SC_NS' (async, ~30s)..." >&2
   OP=$(aws_sd create-private-dns-namespace --name "$SC_NS" --vpc "$VPC_ID" \
     --tags "Key=$TAG_KEY,Value=$TAG_VAL" --query 'OperationId' --output text)
   wait_for "Cloud Map namespace" \

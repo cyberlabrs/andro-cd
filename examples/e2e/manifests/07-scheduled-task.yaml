@@ -11,8 +11,11 @@ spec:
     roleArn: ${scheduler_role}
     enabled: true
   network:
-    subnets: [${subnet_a}, ${subnet_b}]
-    securityGroups: [${security_group}]
+    subnets:
+      - ${subnet_a}
+      - ${subnet_b}
+    securityGroups:
+      - ${security_group}
   taskDefinition:
     cpu: "256"
     memory: "512"

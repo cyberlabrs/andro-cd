@@ -7,8 +7,11 @@ spec:
   cluster: ${cluster}
   region: ${region}
   network:
-    subnets: [${subnet_a}, ${subnet_b}]
-    securityGroups: [${security_group}]
+    subnets:
+      - ${subnet_a}
+      - ${subnet_b}
+    securityGroups:
+      - ${security_group}
   service:
     desiredCount: 4
     assignPublicIp: true
@@ -26,7 +29,8 @@ spec:
       canaryBakeTimeMinutes: 3
       bakeTimeMinutes: 3
       alarms:
-        alarmNames: [${rollback_alarm}]
+        alarmNames:
+          - ${rollback_alarm}
         rollback: true
         enable: true
       lifecycleHooks:

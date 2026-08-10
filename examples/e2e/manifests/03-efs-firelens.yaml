@@ -7,8 +7,11 @@ spec:
   cluster: ${cluster}
   region: ${region}
   network:
-    subnets: [${subnet_a}, ${subnet_b}]
-    securityGroups: [${security_group}]
+    subnets:
+      - ${subnet_a}
+      - ${subnet_b}
+    securityGroups:
+      - ${security_group}
   service:
     desiredCount: 1
     assignPublicIp: true
