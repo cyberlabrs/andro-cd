@@ -127,13 +127,34 @@ class ProfileRecord(Base):
 _Session: Optional[sessionmaker] = None
 _engine = None
 
+# Persistence state — surfaced by /api/status.persistence so operators aren't left
+# guessing whether their app state is being saved. `error` is set only when init
+# actually failed (URL provided but connection/schema step blew up) — that's the
+# case that used to be silent and cost a user their state.
+persistence_status: str = "unknown"    # unknown | enabled | disabled | error
+persistence_error: Optional[str] = None
+persistence_url_safe: Optional[str] = None   # e.g. "user@host:5432/db" (no password)
+
+
+def _redact_url(url: str) -> str:
+    # postgresql+psycopg://user:pass@host:5432/db  ->  user@host:5432/db
+    if "@" not in url:
+        return url
+    scheme_creds, _, tail = url.partition("@")
+    creds = scheme_creds.rsplit("//", 1)[-1]
+    user = creds.split(":", 1)[0] if ":" in creds else creds
+    return f"{user}@{tail}"
+
 
 def init_db() -> bool:
-    global _Session, _engine
+    global _Session, _engine, persistence_status, persistence_error, persistence_url_safe
     url = settings.database_url
     if not url:
+        persistence_status = "disabled"
+        persistence_error = "DATABASE_URL not set"
         log.warning("DATABASE_URL not set — persistence disabled, state is in-memory only")
         return False
+    persistence_url_safe = _redact_url(url)
     if url.startswith("sqlite:///"):
         path = url.removeprefix("sqlite:///")
         parent = os.path.dirname(path)
@@ -145,10 +166,19 @@ def init_db() -> bool:
         _migrate(engine)
         _Session = sessionmaker(engine, expire_on_commit=False)
         _engine = engine
-        log.info("persistence enabled (%s)", url.split("@")[-1])
+        persistence_status = "enabled"
+        persistence_error = None
+        log.info("persistence enabled (%s)", persistence_url_safe)
         return True
     except Exception as e:
-        log.error("failed to initialize database, persistence disabled: %s", e)
+        # This is the noisy path — a DATABASE_URL was provided AND it didn't work.
+        # Emit at ERROR level and keep the message on `persistence_error` so the UI
+        # can render a big red banner (see /api/status.persistence).
+        msg = str(e).splitlines()[0][:400]
+        persistence_status = "error"
+        persistence_error = msg
+        log.error("*** PERSISTENCE FAILED *** state will be in-memory only and LOST on restart. "
+                  "URL=%s reason=%s", persistence_url_safe, msg)
         _Session = None
         return False
 

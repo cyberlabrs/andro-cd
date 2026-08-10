@@ -242,6 +242,24 @@ export default function App() {
       </header>
 
       {error && <div className="banner error">{error}</div>}
+      {status?.persistence && status.persistence.status === "error" && (
+        <div className="banner error">
+          <b>⚠️ Persistence unavailable — state is in-memory only and will be lost on restart.</b>
+          <br />
+          Database at <span className="mono">{status.persistence.url}</span> could not be
+          initialized: <span className="mono">{status.persistence.error}</span>.
+          <br />
+          Repositories, sync history, audit log and AWS profile encryption keys are NOT
+          being saved. Fix <span className="mono">DATABASE_URL</span> and
+          <span className="mono"> POSTGRES_PASSWORD</span> and restart to enable persistence.
+        </div>
+      )}
+      {status?.persistence && status.persistence.status === "disabled" && (
+        <div className="banner warn">
+          <b>Persistence disabled</b> — state is in-memory only.
+          Set <span className="mono">DATABASE_URL</span> to keep state across restarts.
+        </div>
+      )}
       {status?.dryRun && (
         <div className="banner warn">
           <b>Dry-run mode</b> — syncs record the plan but nothing is applied to AWS

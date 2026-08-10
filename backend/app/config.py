@@ -134,6 +134,16 @@ class Settings:
         for token in self.api_tokens:
             if len(token) < 16:
                 problems.append("API_TOKENS contains a token shorter than 16 chars — use e.g. `openssl rand -hex 32`")
+        # Common docker-compose footgun: POSTGRES_PASSWORD is commented out in .env
+        # so the postgres container inits without the `androcd` role, and Andro-CD
+        # silently falls back to in-memory. Warn loudly so users notice at startup.
+        if self.database_url.startswith(("postgresql://", "postgresql+")) and "@" in self.database_url:
+            creds = self.database_url.split("//", 1)[-1].split("@", 1)[0]
+            if ":" not in creds or not creds.split(":", 1)[1]:
+                problems.append(
+                    "DATABASE_URL points at Postgres but the URL has no password — the postgres "
+                    "container likely didn't initialize the user either. Set POSTGRES_PASSWORD in "
+                    ".env and recreate the pgdata volume.")
         return problems
 
 

@@ -62,10 +62,18 @@ class RepoIn(BaseModel):
 
 @router.get("/status")
 def status():
+    from . import db
     out = store.status()
     out["dryRun"] = settings.dry_run
     out["leader"] = engine.is_leader()
     out["version"] = settings.version
+    # Surface persistence health so a broken DB doesn't stay silent — the UI turns
+    # this into a red banner when state != "enabled".
+    out["persistence"] = {
+        "status": db.persistence_status,
+        "url": db.persistence_url_safe,
+        "error": db.persistence_error,
+    }
     return out
 
 
@@ -325,6 +333,22 @@ async def prune_app(name: str, request: Request):
         raise HTTPException(404, f"app '{name}' not found")
     except ValueError as e:
         raise HTTPException(400, str(e))
+
+
+@router.delete("/apps/{name}")
+async def forget_app(name: str, request: Request):
+    """Remove an entry from the store + DB without touching AWS. For orphans
+    that never made it to AWS (parse errors, removed repos). Use POST /prune
+    for apps that have live AWS resources."""
+    require_role(request, "operator")
+    audit(request, "app.forget", name)
+    try:
+        await asyncio.to_thread(engine.forget_app, name)
+    except KeyError:
+        raise HTTPException(404, f"app '{name}' not found")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True, "forgotten": name}
 
 
 class RunIn(BaseModel):

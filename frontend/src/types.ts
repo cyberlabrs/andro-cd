@@ -93,6 +93,11 @@ export interface ServerStatus {
   dryRun: boolean;
   leader: boolean;
   version: string;
+  persistence?: {
+    status: "unknown" | "enabled" | "disabled" | "error";
+    url: string | null;
+    error: string | null;
+  };
 }
 
 export interface TaskInfo {

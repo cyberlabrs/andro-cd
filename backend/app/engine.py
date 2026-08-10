@@ -664,6 +664,35 @@ def prune_single(name: str) -> dict:
     return detail
 
 
+def forget_app(name: str) -> None:
+    """Drop an app from the store + DB WITHOUT touching AWS.
+
+    Intended for stale entries that never reached AWS: parse-error orphans
+    (`invalid:*`), apps registered against a repo that was removed, or apps
+    left behind by a botched sync. Refuses to run against apps in a state
+    that could mean live AWS resources exist — use `prune_single` for those."""
+    with store.lock():
+        app = store.apps.get(name)
+        if not app:
+            raise KeyError(name)
+        if app.sync_status not in ("Orphaned", "Error"):
+            raise ValueError(
+                f"cannot forget app in state {app.sync_status}; "
+                "sync it, prune it, or wait for reconcile first")
+        # Refuse if we ever synced this app — a live ECS service may still exist
+        # and forget-without-prune would leak it. Users must prune first.
+        if app.last_synced or app.coords.get("cluster"):
+            raise ValueError(
+                "app has been synced to AWS at least once; use Prune (which deletes "
+                "the AWS resource) or Sync it back into git before forgetting")
+    db.delete_app_state(name)
+    with store.lock():
+        _restored.pop(name, None)
+        store.apps.pop(name, None)
+    _clear_backoff(name)
+    log.info("forgot app %s from store (no AWS action)", name)
+
+
 def run_single(name: str, count: int | None = None) -> dict:
     """'Run now' for an ECSTask: launch the task definition once, off-lock."""
     with store.lock():
