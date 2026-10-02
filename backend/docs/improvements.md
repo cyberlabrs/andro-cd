@@ -14,10 +14,13 @@ and roughly ordered by value/effort inside each group.
   pauses auto-sync for the app until the next manual Sync; recorded in history)*.
 - **Sync windows** *(done — `syncPolicy.syncWindows: [{days, start, end}]`, UTC; auto-sync
   only inside a window (deploy freeze outside), manual sync always allowed)*.
-- **Multi-repo / multi-source** *(done — repos are added/removed at runtime via the UI
+- **Multi-repo / multi-source** *(done — repos are added/edited/removed at runtime via the UI
   "Repositories" panel or `/api/repos`, persisted in the DB; several branch/path combos supported;
   per-repo auth: HTTPS token, SSH private key, or GitHub App installation tokens with hourly
   auto-refresh)*. Still to do: ApplicationSet-style generators.
+- **Edit a connected repo** *(done — `PATCH /api/repos/{id}` + UI "Edit"; change branch, path,
+  URL or token/auth without re-adding. Only sent fields change; blank secrets keep the stored
+  credential; branch/path/URL changes drop the cached clone and re-sync immediately)*.
 - **Templating** *(values files done — `values.yaml` per directory subtree with `${key}`
   substitution, closest file wins, nested keys flatten to `${image.tag}`; per-env overlays via
   `envs/prod/values.yaml`)*. Still to do: Jsonnet/CUE support.
@@ -74,8 +77,10 @@ and roughly ordered by value/effort inside each group.
   (`AUTH_MODE=oidc`, discovery-based, PKCE + nonce + JWKS id-token verification; works with
   Google/Okta/Keycloak/Dex/Auth0/Azure AD, with user/domain/group allowlists). Signed httpOnly
   session cookies; all `/api` routes protected except the auth flow and the HMAC-verified
-  webhook. API tokens for CI — `API_TOKENS=token:role` as `Authorization: Bearer`)*.
-  Still to do: refresh of expired sessions.
+  webhook. API tokens for CI — `API_TOKENS=token:role` as `Authorization: Bearer`.
+  Sliding-window session refresh: the auth middleware silently re-issues the cookie when it
+  falls inside `SESSION_RENEW_WITHIN` of expiry (2h by default), capped at
+  `SESSION_ABSOLUTE_TTL` (30d) from the initial login so a leaked cookie cannot be renewed forever)*.
 - **RBAC** *(done — viewer/operator/admin roles via `RBAC_ADMINS`/`RBAC_OPERATORS`/
   `RBAC_DEFAULT_ROLE`; enforced on API endpoints and reflected in the UI)*. Still to do:
   GitHub team-based mapping, per-project roles.
@@ -133,8 +138,10 @@ and roughly ordered by value/effort inside each group.
 
 ## 6. UI / UX
 
-- **Side-by-side diff view** — live vs desired YAML/JSON with syntax highlighting, like Argo's
-  diff tab (currently changes are text bullets).
+- **Side-by-side diff view** *(done — Diff tab renders live vs desired side by side in YAML
+  (default) or JSON, with LCS-based line alignment, syntax-highlighted keys/strings/numbers,
+  line numbers, synchronized scrolling between panes, hide-unchanged mode that folds runs of
+  equal lines with a 2-line context, and +N/−N stats at the top)*.
 - **Search, filters, sorting** *(done — search over name/cluster/images/labels, status filter
   chips, sort by name/status/health/recency, all persisted in the URL — filters and the open
   app survive reload and are shareable)*.
@@ -173,16 +180,70 @@ and roughly ordered by value/effort inside each group.
 
 ## Suggested next 5 (best value / effort)
 
-Latest batch done: `ECSTask` kind (one-off jobs + run-now), deployment timeline UI, managed
-load balancers (ALB TG + listener rule creation), generic OIDC login, HA leader election,
-values-file templating, sync windows, dry-run mode, capacity providers (FARGATE_SPOT),
-container health checks, tags/cost allocation, task definition cleanup, JSON logging — on top
-of the security batch (audit log, API tokens, CSP/CSRF/rate limits, non-root container, JSON
-Schema, readiness endpoint). Next up:
+Latest batch done: EFS task volumes (with EFS access-point + IAM auth), FireLens sidecars
+(`awsfirelens` log driver + fluentbit/fluentd router container), ALB request-count
+autoscaling (`ALBRequestCountPerTarget` target-tracking, resolves the ResourceLabel from
+either a referenced or managed target group), Service Connect per-service configuration
+(`enabled`/namespace/services/clientAliases, diffed and applied via `forceNewDeployment`),
+sliding-window session refresh with an absolute cap. Previous batch: `ECSTask` kind
+(one-off jobs + run-now), deployment timeline UI, managed load balancers (ALB TG + listener
+rule creation), generic OIDC login, HA leader election, values-file templating, sync
+windows, dry-run mode, capacity providers (FARGATE_SPOT), container health checks,
+tags/cost allocation, task definition cleanup, JSON logging — on top of the security batch
+(audit log, API tokens, CSP/CSRF/rate limits, non-root container, JSON Schema, readiness
+endpoint). Next up:
 
-1. **EFS volumes & FireLens sidecars** — round out task definition coverage.
-2. **ALB request-count autoscaling** — target-tracking on `ALBRequestCountPerTarget`
-   (now that managed target groups exist).
-3. **Service Connect / Cloud Map** — service discovery config in the manifest.
-4. **Session refresh** — silently renew expiring sessions instead of forcing re-login.
-5. **Grafana dashboard JSON** — ship a ready-made dashboard for the Prometheus metrics.
+Just landed: **ECS native blue/green + canary + linear** — full pass-through of the
+2025/2026 AWS additions. `service.deploymentStrategy` supports type `BLUE_GREEN | CANARY
+| LINEAR` (in addition to `ROLLING`), `bakeTimeMinutes`, `canaryPercent`+bake time,
+`linearStepPercent`+bake time, CloudWatch `alarms` for auto-rollback, and up to 8
+`lifecycleHooks` (AWS_LAMBDA or PAUSE) across all 8 lifecycle stages including
+`POST_TEST_TRAFFIC_SHIFT`. The loadBalancer block accepts `alternateTargetGroupArn`,
+`productionListenerRule`, `testListenerRule` (dark canary) and `roleArn` — required for
+any non-ROLLING strategy. Reconciler now emits `deploymentController=ECS` when a
+strategy is set, threads `advancedConfiguration` through the loadBalancer entry,
+diff-detects drift on strategy/bakeTime/canaryPercent/linearStepPercent/alarms/hooks.
+
+Just landed: **UI for deployment strategy state**. Overview tab now has a dedicated
+Deployment-strategy panel: colored strategy badge (Blue/Green, Canary, Linear), live
+bake-time countdown ticking every 5 s from the primary deployment's `updatedAt`, canary
+slice %, linear step %, rollback-alarm list with `auto-rollback` suffix, and full
+lifecycle-hook list (targetType, hook name, bound stages). Deployment rows also carry
+`rolloutStateReason` as a hover tooltip. Backend `/api/apps/{name}/resources` exposes
+the deploymentStrategy block plus `id`, `createdAt`, `rolloutStateReason` per deployment.
+
+1. **Grafana dashboard JSON** — ship a ready-made dashboard for the Prometheus metrics.
+2. **Backoff & retry** — exponential backoff per app on repeated sync failures instead of
+   retrying every loop; circuit-break an app after N failures with manual reset.
+3. **AWS rate limit handling** — botocore adaptive retry mode, jitter between apps.
+4. **CLI expansion** — `androcd diff`, `androcd sync <app>`, `androcd logs <app>`
+   hitting the API from CI.
+5. **UI-driven incident pause** — global "freeze all syncs" switch + per-app Pause
+   button (see the incident-mode question from users). Today the workaround is
+   `syncPolicy.autoSync: false` per app, but that requires a Git edit — not what
+   you want at 3am. Would persist to DB, surface as a red banner, and be audited.
+
+## Just landed
+
+- **Edit a connected repository** — `PATCH /api/repos/{id}` and an **Edit** button in
+  the Repositories panel. Change the branch a repo tracks, its subdirectory path, its
+  URL, or the access token / auth method in place — no remove-and-re-add. The patch is
+  field-by-field: only keys you send change, and secret fields (token, SSH key, GitHub
+  App key) are left untouched when blank, so switching branches never wipes the token.
+  Changing the branch/path/URL drops the cached clone and triggers an immediate re-sync;
+  apps from an old URL are briefly marked `Orphaned` until rediscovered. Audited as
+  `repo.update`. 5 new tests (188 passing).
+
+- **End-to-end smoke suite** — `moto`-based tests in `backend/tests/test_e2e_moto.py`
+  (9 scenarios, exercises the real `apply` + `compute_diff` pipeline against a
+  mocked AWS: rolling, EFS, FireLens, Service Connect, blue/green with
+  `deploymentController=ECS`, canary, autoscaling, capacity providers, task-def
+  update triggering service update). A companion **sandbox kit** at
+  `examples/e2e/` ships an IAM policy, per-scenario manifests, `preflight.sh` +
+  `run.sh` + `cleanup.sh`, and — most importantly — a one-shot
+  **`bootstrap.sh`** that auto-discovers or creates every AWS resource the
+  suite needs (VPC/subnets/SG, ALB + listener, blue/green target groups, EFS +
+  access point, IAM roles, CloudWatch alarm, Lambda hook, Cloud Map namespace,
+  ECS cluster) and writes `values.local.yaml` from what it produced. A
+  matching **`teardown.sh`** removes only tag-guarded (`androcd-e2e=true`)
+  resources so it's safe on any shared account.

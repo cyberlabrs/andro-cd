@@ -38,6 +38,12 @@ export const addRepo = (data: RepoPayload) =>
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
+export const updateRepo = (id: number, data: Partial<RepoPayload>) =>
+  request<RepoInfo>(`/api/repos/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
 export const deleteRepo = (id: number) =>
   request<{ deleted: number }>(`/api/repos/${id}`, { method: "DELETE" });
 export const fetchDiff = (name: string) =>

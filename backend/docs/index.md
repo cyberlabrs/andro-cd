@@ -599,7 +599,9 @@ SQLite / no-DB deployments are single-instance and always leader.
 
 Manage in the **Repositories** panel. What you can do:
 
-- Add / remove repositories (admin only).
+- Add / edit / remove repositories (admin only).
+- Edit a repo's branch, path, URL or token/auth in place — secrets are kept when
+  left blank, and changing the branch/path/URL triggers an immediate re-sync.
 - See per-repo commit, poll time and errors.
 - Multiple repos and multiple branch/path combos are supported.
 - Removing a repo marks its apps Orphaned — AWS resources are kept.
@@ -791,6 +793,7 @@ webhook, the public docs and `/api/schema`). `/healthz` and `/readyz` are always
 | GET | `/api/schema` | — | JSON Schema of the manifest format (public) |
 | GET | `/api/repos` | any | List tracked repositories |
 | POST | `/api/repos` | admin | Connect a repo |
+| PATCH | `/api/repos/{id}` | admin | Edit a repo (branch, path, url, token/auth) |
 | DELETE | `/api/repos/{id}` | admin | Disconnect a repo |
 | GET | `/api/profiles` | any | List AWS profiles (keys masked) |
 | POST | `/api/profiles` | admin | Add AWS profile (STS-validated, encrypted) |

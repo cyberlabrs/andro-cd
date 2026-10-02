@@ -26,6 +26,7 @@ the HMAC-verified webhook, the docs and `/api/schema`.
 | GET | `/api/schema` | — | JSON Schema of the manifest format |
 | GET | `/api/repos` | any | List tracked repositories |
 | POST | `/api/repos` | admin | Connect a repository |
+| PATCH | `/api/repos/{id}` | admin | Edit a repository (branch, path, URL, token/auth) |
 | DELETE | `/api/repos/{id}` | admin | Disconnect a repository |
 | GET | `/api/profiles` | any | List AWS profiles (keys masked) |
 | POST | `/api/profiles` | admin | Add a profile (STS-validated, encrypted) |
@@ -35,6 +36,15 @@ the HMAC-verified webhook, the docs and `/api/schema`.
 | POST | `/api/auth/logout` | — | Clear the session |
 | GET | `/healthz` / `/readyz` | — | Liveness / readiness |
 | GET | `/metrics` | — | Prometheus metrics |
+
+!!! note "Editing a repository"
+    `PATCH /api/repos/{id}` takes any subset of the connect fields
+    (`url`, `branch`, `path`, `authType`, `token`, `sshKey`, `githubAppId`,
+    `githubInstallationId`, `githubPrivateKey`) — only the keys you send change.
+    Secret fields (`token`, `sshKey`, `githubPrivateKey`) are left as-is when
+    omitted or blank, so you can change a branch without re-entering the token.
+    Changing the branch/path/URL drops the cached clone and triggers an immediate
+    re-sync; apps from the old URL are briefly marked `Orphaned` until rediscovered.
 
 ## CLI
 

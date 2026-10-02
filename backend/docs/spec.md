@@ -142,6 +142,7 @@ Apps removed from Git are marked `Orphaned` (no automatic deletion in v1 — saf
 | GET    | `/api/status`           | tracked repos, last poll, app count       |
 | GET    | `/api/repos`            | list tracked repositories                 |
 | POST   | `/api/repos`            | connect a repo; auth: `https` (token), `ssh` (private key) or `github_app` (App ID + Installation ID + PEM key) |
+| PATCH  | `/api/repos/{id}`       | edit a repo (branch, path, url, token/auth); only sent fields change, blank secrets are kept |
 | DELETE | `/api/repos/{id}`       | remove a repo (apps become Orphaned)      |
 | GET    | `/api/profiles`         | list AWS profiles (keys masked)           |
 | POST   | `/api/profiles`         | add profile `{name, region, accessKeyId, secretAccessKey}` — STS-validated, stored encrypted (Fernet via `ENCRYPTION_KEY`/`SESSION_SECRET`) |
