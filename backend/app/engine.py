@@ -133,6 +133,48 @@ def add_repo(repo_in: dict) -> dict:
     return store.repo_public(repo)
 
 
+def update_repo(repo_id: int, fields: dict) -> dict | None:
+    """Update a tracked repo's url/branch/path/auth in place.
+
+    `fields` carries only the keys the caller wants changed (secrets are omitted
+    when left blank, so an edit that doesn't retype the token keeps the old one).
+    When url/branch/path change we drop the local clone so the next reconcile
+    re-clones from scratch, and any apps that pointed at the old URL are marked
+    Orphaned until the next pass re-discovers them under the new URL.
+    """
+    with store.lock():
+        repo = store.repos.get(repo_id)
+        if not repo:
+            return None
+        old = dict(repo)
+        repo.update(fields)
+        location_changed = (
+            repo["url"] != old["url"]
+            or (repo.get("branch") or "main") != (old.get("branch") or "main")
+            or (repo.get("path") or "") != (old.get("path") or "")
+        )
+        url_changed = repo["url"] != old["url"]
+        if url_changed:
+            for app in store.apps.values():
+                if app.repo == old["url"]:
+                    app.sync_status = "Orphaned"
+                    app.message = "repo URL changed; re-syncing"
+
+    if repo_id > 0:
+        db.update_repo(repo_id, fields)
+    if location_changed:
+        # Clear cached HEAD so sync_repo does a real fetch/clone, and drop the
+        # on-disk clone when the branch/path moved so stale files can't linger.
+        with store.lock():
+            repo["commit"] = None
+            repo["message"] = None
+            repo["author"] = None
+        git_sync.remove_repo_dir(old)
+    log.info("updated repo %s (auth=%s branch=%s path=%s)",
+             repo["url"], repo.get("auth_type"), repo.get("branch"), repo.get("path") or "/")
+    return store.repo_public(repo)
+
+
 def remove_repo(repo_id: int) -> bool:
     with store.lock():
         repo = store.repos.pop(repo_id, None)

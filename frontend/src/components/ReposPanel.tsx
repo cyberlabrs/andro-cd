@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { addRepo, deleteRepo, fetchRepos, type RepoPayload } from "../api";
+import { addRepo, deleteRepo, fetchRepos, updateRepo, type RepoPayload } from "../api";
 import type { RepoInfo } from "../types";
 
 interface Props {
@@ -17,9 +17,20 @@ const AUTH_LABELS: Record<string, string> = {
   https: "token", ssh: "SSH", github_app: "GitHub App",
 };
 
+// When editing an existing repo we pre-fill url/branch/path/auth but leave the
+// secret fields blank — a blank secret means "keep whatever is stored".
+function formFromRepo(r: RepoInfo): RepoPayload {
+  return {
+    url: r.url, branch: r.branch, path: r.path, authType: r.authType,
+    token: "", sshKey: "", githubAppId: "", githubInstallationId: "", githubPrivateKey: "",
+  };
+}
+
 export function ReposPanel({ canAdmin, onClose, onChanged }: Props) {
   const [repos, setRepos] = useState<RepoInfo[]>([]);
   const [form, setForm] = useState<RepoPayload>(EMPTY_FORM);
+  // null = the "add" form; a number = editing that repo id.
+  const [editingId, setEditingId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -37,7 +48,19 @@ export function ReposPanel({ canAdmin, onClose, onChanged }: Props) {
     return () => clearInterval(t);
   }, [load]);
 
-  const onAdd = async () => {
+  const resetForm = () => {
+    setEditingId(null);
+    setForm(EMPTY_FORM);
+    setError(null);
+  };
+
+  const onEdit = (repo: RepoInfo) => {
+    setEditingId(repo.id);
+    setForm(formFromRepo(repo));
+    setError(null);
+  };
+
+  const onSave = async () => {
     if (!form.url.trim()) {
       setError("repository URL is required");
       return;
@@ -45,8 +68,21 @@ export function ReposPanel({ canAdmin, onClose, onChanged }: Props) {
     setBusy(true);
     setError(null);
     try {
-      await addRepo(form);
-      setForm(EMPTY_FORM);
+      if (editingId === null) {
+        await addRepo(form);
+      } else {
+        // Only send secrets that were actually typed, so a blank field keeps the
+        // stored credential instead of wiping it.
+        const patch: Partial<RepoPayload> = {
+          url: form.url, branch: form.branch, path: form.path, authType: form.authType,
+          githubAppId: form.githubAppId, githubInstallationId: form.githubInstallationId,
+        };
+        if (form.token) patch.token = form.token;
+        if (form.sshKey) patch.sshKey = form.sshKey;
+        if (form.githubPrivateKey) patch.githubPrivateKey = form.githubPrivateKey;
+        await updateRepo(editingId, patch);
+      }
+      resetForm();
       await load();
       onChanged();
     } catch (e) {
@@ -63,6 +99,7 @@ export function ReposPanel({ canAdmin, onClose, onChanged }: Props) {
     setError(null);
     try {
       await deleteRepo(repo.id);
+      if (editingId === repo.id) resetForm();
       await load();
       onChanged();
     } catch (e) {
@@ -73,6 +110,9 @@ export function ReposPanel({ canAdmin, onClose, onChanged }: Props) {
   const set = (field: keyof RepoPayload) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
       setForm({ ...form, [field]: e.target.value });
+
+  const isEditing = editingId !== null;
+  const secretPlaceholderSuffix = isEditing ? " — leave blank to keep current" : "";
 
   return (
     <div className="overlay" onClick={onClose}>
@@ -88,7 +128,7 @@ export function ReposPanel({ canAdmin, onClose, onChanged }: Props) {
 
         <div className="panel-body">
           <section>
-            <h3>Connect a repository</h3>
+            <h3>{isEditing ? "Edit repository" : "Connect a repository"}</h3>
             <div className="repo-form">
               <input
                 placeholder={form.authType === "ssh"
@@ -117,7 +157,7 @@ export function ReposPanel({ canAdmin, onClose, onChanged }: Props) {
               {form.authType === "https" && (
                 <input
                   type="password"
-                  placeholder="access token (optional, for private repos)"
+                  placeholder={`access token (optional, for private repos)${secretPlaceholderSuffix}`}
                   value={form.token}
                   onChange={set("token")}
                 />
@@ -125,7 +165,9 @@ export function ReposPanel({ canAdmin, onClose, onChanged }: Props) {
               {form.authType === "ssh" && (
                 <textarea
                   rows={5}
-                  placeholder={"-----BEGIN OPENSSH PRIVATE KEY-----\n… private key with read access to the repo …"}
+                  placeholder={isEditing
+                    ? "paste a new SSH private key to replace the stored one — leave blank to keep current"
+                    : "-----BEGIN OPENSSH PRIVATE KEY-----\n… private key with read access to the repo …"}
                   value={form.sshKey}
                   onChange={set("sshKey")}
                 />
@@ -138,21 +180,30 @@ export function ReposPanel({ canAdmin, onClose, onChanged }: Props) {
                   </div>
                   <textarea
                     rows={5}
-                    placeholder={"-----BEGIN RSA PRIVATE KEY-----\n… GitHub App private key (.pem) …"}
+                    placeholder={isEditing
+                      ? "paste a new GitHub App private key (.pem) to replace the stored one — leave blank to keep current"
+                      : "-----BEGIN RSA PRIVATE KEY-----\n… GitHub App private key (.pem) …"}
                     value={form.githubPrivateKey}
                     onChange={set("githubPrivateKey")}
                   />
                 </>
               )}
 
-              <button
-                className="btn primary"
-                onClick={onAdd}
-                disabled={busy || !canAdmin}
-                title={canAdmin ? "" : "requires admin role"}
-              >
-                {busy ? "Connecting…" : "Connect"}
-              </button>
+              <div className="repo-form-row">
+                <button
+                  className="btn primary"
+                  onClick={onSave}
+                  disabled={busy || !canAdmin}
+                  title={canAdmin ? "" : "requires admin role"}
+                >
+                  {busy ? (isEditing ? "Saving…" : "Connecting…") : isEditing ? "Save changes" : "Connect"}
+                </button>
+                {isEditing && (
+                  <button className="btn" onClick={resetForm} disabled={busy}>
+                    Cancel
+                  </button>
+                )}
+              </div>
             </div>
           </section>
 
@@ -160,7 +211,7 @@ export function ReposPanel({ canAdmin, onClose, onChanged }: Props) {
             <h3>Tracked repositories ({repos.length})</h3>
             {repos.length === 0 && <div className="muted">No repositories connected yet.</div>}
             {repos.map((r) => (
-              <div key={r.id} className="repo-entry">
+              <div key={r.id} className={`repo-entry ${editingId === r.id ? "editing" : ""}`}>
                 <div className="repo-entry-main">
                   <div className="repo-url">{r.url}</div>
                   <div className="card-meta">
@@ -178,14 +229,24 @@ export function ReposPanel({ canAdmin, onClose, onChanged }: Props) {
                   </div>
                   {r.error && <div className="change err">• {r.error}</div>}
                 </div>
-                <button
-                  className="btn danger"
-                  disabled={!canAdmin}
-                  title={canAdmin ? "" : "requires admin role"}
-                  onClick={() => onDelete(r)}
-                >
-                  Remove
-                </button>
+                <div className="panel-actions">
+                  <button
+                    className="btn"
+                    disabled={!canAdmin}
+                    title={canAdmin ? "" : "requires admin role"}
+                    onClick={() => onEdit(r)}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    className="btn danger"
+                    disabled={!canAdmin}
+                    title={canAdmin ? "" : "requires admin role"}
+                    onClick={() => onDelete(r)}
+                  >
+                    Remove
+                  </button>
+                </div>
               </div>
             ))}
           </section>

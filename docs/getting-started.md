@@ -31,6 +31,15 @@ For GitHub App, the backend exchanges a JWT for short-lived installation tokens 
 refreshes them automatically. Credentials are never written to disk — HTTPS and GitHub
 App tokens flow through in-memory headers only.
 
+### Editing a connected repository
+
+Click **Edit** on any tracked repository to change the branch it watches, the
+subdirectory path, the URL, or the access token / auth method — no need to remove
+and re-add it. Secret fields (token, SSH key, GitHub App key) stay as they are
+unless you type a new value, so switching branches won't make you re-enter the
+token. Changing the branch, path, or URL triggers an immediate re-sync against the
+new target.
+
 ## Your first manifest
 
 Push this to the connected repo:

@@ -517,6 +517,12 @@ body {
   border-bottom: 1px solid var(--border);
   padding: 12px 0;
 }
+.repo-entry.editing {
+  background: var(--row-hover, rgba(127, 127, 127, 0.08));
+  border-radius: 6px;
+  padding-left: 8px;
+  padding-right: 8px;
+}
 .repo-entry-main { min-width: 0; }
 .repo-url {
   font-family: "SF Mono", Menlo, monospace;

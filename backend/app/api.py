@@ -124,6 +124,91 @@ async def create_repo(repo: RepoIn, request: Request):
     return created
 
 
+class RepoPatch(BaseModel):
+    # All optional: only fields that are sent get changed. Secret fields
+    # (token/sshKey/githubPrivateKey) are only overwritten when a non-empty
+    # value is provided, so editing the branch alone never wipes the token.
+    url: str | None = None
+    branch: str | None = None
+    path: str | None = None
+    authType: str | None = None
+    token: str | None = None
+    sshKey: str | None = None
+    githubAppId: str | None = None
+    githubInstallationId: str | None = None
+    githubPrivateKey: str | None = None
+
+
+@router.patch("/repos/{repo_id}")
+async def update_repo(repo_id: int, patch: RepoPatch, request: Request):
+    require_role(request, "admin")
+    with store.lock():
+        existing = store.repos.get(repo_id)
+        current = dict(existing) if existing else None
+    if current is None:
+        raise HTTPException(404, f"repo {repo_id} not found")
+
+    fields: dict = {}
+    if patch.url is not None:
+        url = patch.url.strip()
+        if not url.startswith(("https://", "http://", "git@", "ssh://", "file://")):
+            raise HTTPException(400, "unsupported repo URL (use https://, git@, ssh:// or file://)")
+        fields["url"] = url
+    if patch.branch is not None:
+        fields["branch"] = patch.branch.strip() or "main"
+    if patch.path is not None:
+        fields["path"] = patch.path.strip("/ ")
+    if patch.authType is not None:
+        if patch.authType not in ("https", "ssh", "github_app"):
+            raise HTTPException(400, "authType must be https, ssh or github_app")
+        fields["auth_type"] = patch.authType
+    # Secrets: only replace when a value is actually supplied.
+    if patch.token:
+        fields["token"] = patch.token.strip()
+    if patch.sshKey:
+        fields["ssh_key"] = patch.sshKey.strip()
+    if patch.githubAppId is not None:
+        fields["github_app_id"] = patch.githubAppId.strip()
+    if patch.githubInstallationId is not None:
+        fields["github_installation_id"] = patch.githubInstallationId.strip()
+    if patch.githubPrivateKey:
+        fields["github_private_key"] = patch.githubPrivateKey.strip()
+
+    # Validate the resulting auth is self-consistent (merge patch over current).
+    merged = {**current, **fields}
+    auth_type = merged.get("auth_type") or "https"
+    if auth_type == "ssh" and not (merged.get("ssh_key") or "").strip():
+        raise HTTPException(400, "sshKey is required for ssh auth")
+    if auth_type == "github_app" and not (
+        (merged.get("github_app_id") or "").strip()
+        and (merged.get("github_installation_id") or "").strip()
+        and (merged.get("github_private_key") or "").strip()
+    ):
+        raise HTTPException(400, "githubAppId, githubInstallationId and githubPrivateKey are required for github_app auth")
+    if auth_type == "github_app" and not (merged.get("url") or "").startswith("https://"):
+        raise HTTPException(400, "github_app auth requires an https:// repo URL")
+
+    # Don't let an edit collide with another tracked repo.
+    with store.lock():
+        duplicate = any(
+            rid != repo_id
+            and r["url"] == merged["url"]
+            and (r.get("branch") or "main") == (merged.get("branch") or "main")
+            and (r.get("path") or "") == (merged.get("path") or "")
+            for rid, r in store.repos.items()
+        )
+    if duplicate:
+        raise HTTPException(409, "another repo with the same url/branch/path already exists")
+
+    updated = engine.update_repo(repo_id, fields)
+    if updated is None:
+        raise HTTPException(404, f"repo {repo_id} not found")
+    audit(request, "repo.update", merged.get("url", ""),
+          f"branch={merged.get('branch')} path={merged.get('path')} auth={auth_type}")
+    asyncio.get_running_loop().run_in_executor(None, engine.reconcile_once)
+    return updated
+
+
 @router.delete("/repos/{repo_id}")
 def delete_repo(repo_id: int, request: Request):
     require_role(request, "admin")

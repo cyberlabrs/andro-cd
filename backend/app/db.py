@@ -386,6 +386,29 @@ def add_repo(repo: dict) -> Optional[int]:
         return None
 
 
+def update_repo(repo_id: int, fields: dict) -> None:
+    """Patch an existing repo row. Only the keys present in `fields` are written,
+    so secrets (token/ssh_key/github_private_key) are left untouched unless the
+    caller explicitly passes a new value."""
+    if not _Session:
+        return
+    allowed = {
+        "url", "branch", "path", "token", "auth_type",
+        "ssh_key", "github_app_id", "github_installation_id", "github_private_key",
+    }
+    try:
+        with _Session.begin() as s:
+            rec = s.get(RepoRecord, repo_id)
+            if not rec:
+                return
+            for key, value in fields.items():
+                if key in allowed:
+                    setattr(rec, key, value)
+            s.add(rec)
+    except Exception as e:
+        log.error("failed to update repo %s: %s", repo_id, e)
+
+
 def delete_repo(repo_id: int) -> None:
     if not _Session:
         return

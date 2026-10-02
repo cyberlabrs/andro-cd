@@ -14,10 +14,13 @@ and roughly ordered by value/effort inside each group.
   pauses auto-sync for the app until the next manual Sync; recorded in history)*.
 - **Sync windows** *(done — `syncPolicy.syncWindows: [{days, start, end}]`, UTC; auto-sync
   only inside a window (deploy freeze outside), manual sync always allowed)*.
-- **Multi-repo / multi-source** *(done — repos are added/removed at runtime via the UI
+- **Multi-repo / multi-source** *(done — repos are added/edited/removed at runtime via the UI
   "Repositories" panel or `/api/repos`, persisted in the DB; several branch/path combos supported;
   per-repo auth: HTTPS token, SSH private key, or GitHub App installation tokens with hourly
   auto-refresh)*. Still to do: ApplicationSet-style generators.
+- **Edit a connected repo** *(done — `PATCH /api/repos/{id}` + UI "Edit"; change branch, path,
+  URL or token/auth without re-adding. Only sent fields change; blank secrets keep the stored
+  credential; branch/path/URL changes drop the cached clone and re-sync immediately)*.
 - **Templating** *(values files done — `values.yaml` per directory subtree with `${key}`
   substitution, closest file wins, nested keys flatten to `${image.tag}`; per-env overlays via
   `envs/prod/values.yaml`)*. Still to do: Jsonnet/CUE support.
@@ -221,6 +224,15 @@ the deploymentStrategy block plus `id`, `createdAt`, `rolloutStateReason` per de
    you want at 3am. Would persist to DB, surface as a red banner, and be audited.
 
 ## Just landed
+
+- **Edit a connected repository** — `PATCH /api/repos/{id}` and an **Edit** button in
+  the Repositories panel. Change the branch a repo tracks, its subdirectory path, its
+  URL, or the access token / auth method in place — no remove-and-re-add. The patch is
+  field-by-field: only keys you send change, and secret fields (token, SSH key, GitHub
+  App key) are left untouched when blank, so switching branches never wipes the token.
+  Changing the branch/path/URL drops the cached clone and triggers an immediate re-sync;
+  apps from an old URL are briefly marked `Orphaned` until rediscovered. Audited as
+  `repo.update`. 5 new tests (188 passing).
 
 - **End-to-end smoke suite** — `moto`-based tests in `backend/tests/test_e2e_moto.py`
   (9 scenarios, exercises the real `apply` + `compute_diff` pipeline against a

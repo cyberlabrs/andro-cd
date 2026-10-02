@@ -110,6 +110,81 @@ def test_load_manifest_docs_accepts_placeholders_in_flow_sequences(tmp_path, mon
     assert doc["spec"]["network"]["securityGroups"] == ["sg-xxx"]
 
 
+# ---------- editing a connected repo ----------
+
+@pytest.fixture()
+def clean_store():
+    """Isolate the global store around each repo-editing test."""
+    from app.state import store
+    saved_repos, saved_apps = dict(store.repos), dict(store.apps)
+    store.repos.clear()
+    store.apps.clear()
+    yield store
+    store.repos.clear(); store.repos.update(saved_repos)
+    store.apps.clear(); store.apps.update(saved_apps)
+
+
+def test_update_repo_changes_branch_and_token(clean_store, tmp_path, monkeypatch):
+    from app import engine
+    monkeypatch.setattr(settings, "repos_base_dir", str(tmp_path))
+    repo = engine.add_repo({"url": "https://example/x", "branch": "main", "token": "old"})
+    rid = repo["id"]
+    # Simulate a prior successful sync so we can prove location change clears HEAD.
+    clean_store.repos[rid]["commit"] = "abc123"
+
+    out = engine.update_repo(rid, {"branch": "develop", "token": "new"})
+    assert out is not None
+    stored = clean_store.repos[rid]
+    assert stored["branch"] == "develop"
+    assert stored["token"] == "new"
+    # Branch moved => cached HEAD is dropped so the next reconcile re-clones.
+    assert stored["commit"] is None
+
+
+def test_update_repo_keeps_token_when_not_provided(clean_store, tmp_path, monkeypatch):
+    from app import engine
+    monkeypatch.setattr(settings, "repos_base_dir", str(tmp_path))
+    rid = engine.add_repo({"url": "https://example/y", "branch": "main", "token": "keepme"})["id"]
+    engine.update_repo(rid, {"path": "subdir"})   # patch without a token
+    assert clean_store.repos[rid]["token"] == "keepme"
+    assert clean_store.repos[rid]["path"] == "subdir"
+
+
+def test_update_repo_url_change_orphans_old_apps(clean_store, tmp_path, monkeypatch):
+    from app import engine
+    from app.state import AppState
+    monkeypatch.setattr(settings, "repos_base_dir", str(tmp_path))
+    rid = engine.add_repo({"url": "https://old/repo", "branch": "main"})["id"]
+    clean_store.apps["web"] = AppState(name="web", file="web.yaml", repo="https://old/repo")
+
+    engine.update_repo(rid, {"url": "https://new/repo"})
+    assert clean_store.repos[rid]["url"] == "https://new/repo"
+    assert clean_store.apps["web"].sync_status == "Orphaned"
+
+
+def test_update_repo_missing_returns_none(clean_store):
+    from app import engine
+    assert engine.update_repo(999, {"branch": "x"}) is None
+
+
+def test_patch_repo_endpoint(clean_store, tmp_path, monkeypatch):
+    """PATCH /api/repos/{id} updates branch, returns the public repo, 404s on
+    unknown ids and 400s on a bad URL."""
+    from fastapi.testclient import TestClient
+    from app import engine
+    from app.main import app
+    monkeypatch.setattr(settings, "repos_base_dir", str(tmp_path))
+    rid = engine.add_repo({"url": "https://example/z", "branch": "main"})["id"]
+    client = TestClient(app, raise_server_exceptions=False)
+
+    ok = client.patch(f"/api/repos/{rid}", json={"branch": "release"})
+    assert ok.status_code == 200
+    assert ok.json()["branch"] == "release"
+
+    assert client.patch("/api/repos/424242", json={"branch": "x"}).status_code == 404
+    assert client.patch(f"/api/repos/{rid}", json={"url": "notaurl"}).status_code == 400
+
+
 # ---------- sync windows ----------
 
 MONDAY_NOON = 1750676400   # 2025-06-23 11:00 UTC (Monday)
