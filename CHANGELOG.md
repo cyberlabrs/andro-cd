@@ -5,6 +5,13 @@ All notable changes are documented here. The format follows
 [Semantic Versioning](https://semver.org/). Entries are generated automatically by
 [release-please](https://github.com/googleapis/release-please).
 
+## [0.9.0](https://github.com/cyberlabrs/andro-cd/compare/v0.8.0...v0.9.0) (2026-10-02)
+
+
+### Features
+
+* **repos:** edit a connected repository (branch, path, url, token/auth) ([#9](https://github.com/cyberlabrs/andro-cd/issues/9)) ([220d34d](https://github.com/cyberlabrs/andro-cd/commit/220d34d3a8485640539fc21371acbb367a0df434))
+
 ## [0.8.0](https://github.com/cyberlabrs/andro-cd/compare/v0.7.0...v0.8.0) (2026-08-10)
 
 
